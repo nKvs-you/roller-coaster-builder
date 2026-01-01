@@ -130,7 +130,7 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
       }
       
       const loopRadius = 8;
-      const numPoints = 10;
+      const numPoints = 16; // More points for smoother curve
       const loopPoints: TrackPoint[] = [];
       
       // Loop path using θ from 0 to 2π:
