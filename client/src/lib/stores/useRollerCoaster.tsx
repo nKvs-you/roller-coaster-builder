@@ -189,53 +189,27 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         .add(forward.clone().multiplyScalar(forwardSeparation))
         .add(right.clone().multiplyScalar(exitSeparation));
       
-      // Create smooth transition points using cubic Hermite interpolation
+      // Create smooth transition points
       const transitionPoints: TrackPoint[] = [];
+      
+      // First: add an immediate exit point offset laterally from the loop exit
+      // This pulls the track away from the entry immediately
+      transitionPoints.push({
+        id: `point-${++pointCounter}`,
+        position: loopExit.clone().add(right.clone().multiplyScalar(exitSeparation)),
+        tilt: 0
+      });
+      
       if (nextPoint) {
         const nextPos = nextPoint.position.clone();
         
-        // Exit tangent: loop exits going forward (same direction as entry)
-        const exitTangent = forward.clone();
-        
-        // Target tangent: direction toward next point
-        const toNext = nextPos.clone().sub(offsetLoopExit);
-        const targetTangent = toNext.clone().normalize();
-        
-        // Distance for transition
-        const dist = toNext.length();
-        
-        // Create 3 transition points with Hermite blending
-        for (let i = 1; i <= 3; i++) {
-          const t = i / 4; // 0.25, 0.5, 0.75
-          
-          // Hermite basis functions
-          const h00 = 2*t*t*t - 3*t*t + 1;
-          const h10 = t*t*t - 2*t*t + t;
-          const h01 = -2*t*t*t + 3*t*t;
-          const h11 = t*t*t - t*t;
-          
-          // Tangent scaling (use distance as tangent magnitude)
-          const tangentScale = dist * 0.5;
-          
-          // Add decreasing lateral offset (starts with full separation, eases to zero)
-          const lateralT = 1 - t; // 0.75, 0.5, 0.25
-          const lateralOffset = lateralT * exitSeparation;
-          
-          const px = h00 * offsetLoopExit.x + h10 * exitTangent.x * tangentScale + 
-                     h01 * nextPos.x + h11 * targetTangent.x * tangentScale +
-                     right.x * lateralOffset;
-          const py = h00 * offsetLoopExit.y + h10 * exitTangent.y * tangentScale + 
-                     h01 * nextPos.y + h11 * targetTangent.y * tangentScale;
-          const pz = h00 * offsetLoopExit.z + h10 * exitTangent.z * tangentScale + 
-                     h01 * nextPos.z + h11 * targetTangent.z * tangentScale +
-                     right.z * lateralOffset;
-          
-          transitionPoints.push({
-            id: `point-${++pointCounter}`,
-            position: new THREE.Vector3(px, py, pz),
-            tilt: 0
-          });
-        }
+        // Add a midpoint transition to smooth the path to the next point
+        const midPoint = offsetLoopExit.clone().lerp(nextPos, 0.5);
+        transitionPoints.push({
+          id: `point-${++pointCounter}`,
+          position: midPoint,
+          tilt: 0
+        });
       }
       
       // Combine: original up to entry + loop + transitions + original remainder (unchanged)
