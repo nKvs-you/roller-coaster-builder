@@ -61,6 +61,14 @@ Custom build script (`script/build.ts`) that:
 
 ## Key Implementation Notes
 
+### Scale Configuration
+All track elements are scaled to half size to allow building more intricate coasters on the same canvas:
+- Track points: sphere radius 0.25, transform handle size 0.4
+- Rails: offset 0.15, line width 2
+- Sleepers: 0.5 x 0.04 x 0.06
+- Loop radius: 4 units, helix separation 1.75 units
+- Coaster car: 0.5 x 0.25 x 1.0
+
 ### Loop Orientation Fix (Critical)
 When rendering loops with corkscrew/helical geometry, the track orientation must use a **complete reference frame** from the ideal circular loop - including the TANGENT, not just the up/normal vectors. The helical spline tangent contains lateral torsion that causes visible twisting at quarter-points (θ=π/2 and θ=3π/2).
 
@@ -70,6 +78,9 @@ Solution implemented in Track.tsx:
 - Compute up as inward radial: `-sin(θ)*forward + cos(θ)*up`
 - Normal is constant: `right` vector
 - All three vectors (tangent, up, normal) must come from reference frame, not the spline
+
+### Loop Supports
+Loops use cable supports (4 thin steel cables at 45°, 90°, 135°, 225°) instead of wood supports. Regular track sections use traditional wooden supports with crossbraces.
 
 ## External Dependencies
 
