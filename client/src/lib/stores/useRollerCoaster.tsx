@@ -220,9 +220,8 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         const forwardOffset = Math.sin(theta) * loopRadius;
         const verticalOffset = (1 - Math.cos(theta)) * loopRadius;
         
-        // Corkscrew that returns to center: 0 at start, peaks mid-loop, 0 at exit
-        // sin(theta/2) = 0 at theta=0, 1 at theta=π, 0 at theta=2π
-        const lateralOffset = Math.sin(theta * 0.5) * helixSeparation;
+        // Linear corkscrew: gradually increases lateral offset to separate entry from exit
+        const lateralOffset = t * helixSeparation;
         
         loopPoints.push({
           id: `point-${++pointCounter}`,
@@ -243,23 +242,27 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         });
       }
       
-      // Get the next point so we can rejoin it
-      const nextPoint = state.trackPoints[pointIndex + 1];
-      
       // Loop exit position (last point of loop)
       const loopExit = loopPoints[loopPoints.length - 1].position.clone();
       
-      // === EXIT: Simply connect loop exit to the original legacy track ===
-      // No lateral offset, no moving legacy points - just let the spline naturally curve back
-      // The loop already ends offset laterally due to helix; the spline will smoothly rejoin
+      // === EXIT: Shift ALL downstream legacy points by the loop's final lateral offset ===
+      // This ensures the entire rest of the track aligns with the loop exit - NO hook
+      const lateralShift = right.clone().multiplyScalar(helixSeparation);
       
-      // Combine: all before entry + approach + entry + loop + original legacy points (unchanged)
+      // Translate all legacy points after the loop entry
+      const shiftedLegacyPoints: TrackPoint[] = state.trackPoints.slice(pointIndex + 1).map((pt, idx) => ({
+        ...pt,
+        id: `point-${++pointCounter}`,
+        position: pt.position.clone().add(lateralShift)
+      }));
+      
+      // Combine: all before entry + approach + entry + loop + shifted legacy points
       const newTrackPoints = [
         ...state.trackPoints.slice(0, pointIndex), // All points before entry
         ...approachPoints,                          // Smooth approach to entry
         entryPoint,                                 // The entry point itself
         ...loopPoints,                              // The loop (exits at helix offset)
-        ...state.trackPoints.slice(pointIndex + 1) // Keep all legacy points as-is
+        ...shiftedLegacyPoints                      // Legacy points shifted to match loop exit
       ];
       
       return { trackPoints: newTrackPoints };
