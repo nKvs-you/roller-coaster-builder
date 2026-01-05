@@ -161,9 +161,10 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
         const forwardOffset = Math.sin(theta) * loopRadius;
         const verticalOffset = (1 - Math.cos(theta)) * loopRadius;
         
-        // Bell curve for lateral offset: peaks at t=0.5, returns to 0 at t=1
-        // This ensures exit returns to centerline naturally
-        const lateralOffset = Math.sin(t * Math.PI) * helixSeparation;
+        // Smoothstep ramp: reaches full separation at exit with zero derivative
+        // This creates the corkscrew effect where exit is offset from entry
+        const smoothT = t * t * (3 - 2 * t); // smoothstep(0, 1, t)
+        const lateralOffset = smoothT * helixSeparation;
         
         loopPoints.push({
           id: `point-${++pointCounter}`,
