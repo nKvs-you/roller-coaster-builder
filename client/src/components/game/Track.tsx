@@ -2,93 +2,12 @@ import { useMemo } from "react";
 import * as THREE from "three";
 import { useRollerCoaster, LoopSegment } from "@/lib/stores/useRollerCoaster";
 import { Line } from "@react-three/drei";
-
-function interpolateTilt(trackPoints: { tilt: number }[], t: number, isLooped: boolean): number {
-  if (trackPoints.length < 2) return 0;
-  
-  const n = trackPoints.length;
-  const scaledT = isLooped ? t * n : t * (n - 1);
-  const index = Math.floor(scaledT);
-  const frac = scaledT - index;
-  
-  if (isLooped) {
-    const i0 = index % n;
-    const i1 = (index + 1) % n;
-    return trackPoints[i0].tilt * (1 - frac) + trackPoints[i1].tilt * frac;
-  } else {
-    if (index >= n - 1) return trackPoints[n - 1].tilt;
-    return trackPoints[index].tilt * (1 - frac) + trackPoints[index + 1].tilt * frac;
-  }
-}
-
-interface RailSample {
-  point: THREE.Vector3;
-  tangent: THREE.Vector3;
-  normal: THREE.Vector3;
-  up: THREE.Vector3;
-  tilt: number;
-}
-
-interface BarrelRollFrame {
-  entryPos: THREE.Vector3;
-  forward: THREE.Vector3;
-  up: THREE.Vector3;
-  right: THREE.Vector3;
-  radius: number;
-  pitch: number;
-}
-
-// Vertical loop with corkscrew offset: track goes in a vertical circle but with
-// lateral offset to prevent self-intersection at the bottom
-// Rider goes upside down at the top (θ=π), loop is perpendicular to track direction
-// θ(t) = 2π * (t - sin(2πt)/(2π)) ensures zero angular velocity at endpoints for C1 continuity
-function sampleVerticalLoopAnalytically(
-  frame: BarrelRollFrame,
-  t: number  // 0 to 1
-): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3; normal: THREE.Vector3 } {
-  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
-  
-  const twoPi = Math.PI * 2;
-  
-  // Corkscrew offset: separates ascending and descending parts of the loop
-  // sin(θ) is positive going up, negative coming down
-  const corkscrewOffset = radius * 0.4;  // 40% of radius for comfortable separation
-  
-  // Eased theta: starts and ends with zero angular velocity
-  const theta = twoPi * (t - Math.sin(twoPi * t) / twoPi);
-  const dThetaDt = twoPi * (1 - Math.cos(twoPi * t));
-  
-  // Vertical loop with lateral corkscrew:
-  // - forward: radius*sin(θ) + pitch*t for forward/backward + advancement
-  // - up: radius*(1-cos(θ)) for vertical motion (always >= 0)
-  // - right: corkscrewOffset*sin(θ) separates up/down tracks laterally
-  const point = new THREE.Vector3()
-    .copy(entryPos)
-    .addScaledVector(forward, pitch * t + radius * Math.sin(theta))
-    .addScaledVector(U0, radius * (1 - Math.cos(theta)))
-    .addScaledVector(R0, corkscrewOffset * Math.sin(theta));
-  
-  // Tangent: derivative of position including corkscrew term
-  const tangent = new THREE.Vector3()
-    .copy(forward).multiplyScalar(pitch + radius * Math.cos(theta) * dThetaDt)
-    .addScaledVector(U0, radius * Math.sin(theta) * dThetaDt)
-    .addScaledVector(R0, corkscrewOffset * Math.cos(theta) * dThetaDt)
-    .normalize();
-  
-  // Up vector rotates around the RIGHT axis (perpendicular to the loop plane)
-  // At θ=0: up = U0 (normal)
-  // At θ=π: up = -U0 (upside down at top of loop!)
-  // At θ=2π: up = U0 (back to normal)
-  const rotatedUp = new THREE.Vector3()
-    .addScaledVector(U0, Math.cos(theta))
-    .addScaledVector(forward, -Math.sin(theta))
-    .normalize();
-  
-  // Right vector stays constant (perpendicular to the loop plane)
-  const normal = R0.clone();
-  
-  return { point, tangent, up: rotatedUp, normal };
-}
+import { 
+  interpolateTilt, 
+  sampleVerticalLoopAnalytically,
+  type RailSample,
+  type BarrelRollFrame,
+} from "@/lib/trackUtils";
 
 export function Track() {
   const { trackPoints, loopSegments, isLooped, showWoodSupports, isNightMode } = useRollerCoaster();

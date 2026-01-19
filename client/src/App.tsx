@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import "@fontsource/inter";
 import { Ground } from "./components/game/Ground";
 import { TrackBuilder } from "./components/game/TrackBuilder";
@@ -7,8 +7,15 @@ import { BuildCamera } from "./components/game/BuildCamera";
 import { RideCamera } from "./components/game/RideCamera";
 import { Sky } from "./components/game/Sky";
 import { GameUI } from "./components/game/GameUI";
+import { GForceDisplay } from "./components/game/GForceDisplay";
+import { ParticleEffects } from "./components/game/ParticleEffects";
+import { EditorGizmos } from "./components/game/EditorGizmos";
+import { SoundEffects } from "./components/game/SoundEffects";
+import { PhysicsDebugOverlay } from "./components/game/PhysicsDebugOverlay";
 import { useRollerCoaster } from "./lib/stores/useRollerCoaster";
 import { useAudio } from "./lib/stores/useAudio";
+import { ErrorBoundary, Canvas3DErrorFallback } from "./components/ErrorBoundary";
+import { loadPhysicsEngine } from "./lib/wasm/physicsEngine";
 
 function MusicController() {
   const { isNightMode } = useRollerCoaster();
@@ -100,6 +107,19 @@ function MusicController() {
 
 function Scene() {
   const { mode } = useRollerCoaster();
+  const [showDebug, setShowDebug] = useState(false);
+  
+  // Toggle debug with keyboard
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F3') {
+        e.preventDefault();
+        setShowDebug(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
   
   return (
     <>
@@ -110,31 +130,58 @@ function Scene() {
       <Suspense fallback={null}>
         <Ground />
         <TrackBuilder />
+        
+        {/* Game-like effects */}
+        <ParticleEffects />
+        
+        {/* Editor gizmos for professional editing */}
+        <EditorGizmos />
+        
+        {/* Physics debug overlay (toggle with F3) */}
+        {showDebug && (
+          <PhysicsDebugOverlay 
+            showVelocity={true}
+            showForces={true}
+            showBounds={true}
+            showGForceHeatmap={true}
+          />
+        )}
       </Suspense>
     </>
   );
 }
 
 function App() {
+  // Try to load WASM physics engine on startup
+  useEffect(() => {
+    loadPhysicsEngine().catch(() => {
+      console.log('Using JavaScript physics fallback');
+    });
+  }, []);
+  
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
       <MusicController />
-      <Canvas
-        shadows
-        camera={{
-          position: [20, 15, 20],
-          fov: 60,
-          near: 0.1,
-          far: 1000
-        }}
-        gl={{
-          antialias: true,
-          powerPreference: "default"
-        }}
-      >
-        <Scene />
-      </Canvas>
+      <SoundEffects />
+      <ErrorBoundary fallback={<Canvas3DErrorFallback />}>
+        <Canvas
+          shadows
+          camera={{
+            position: [20, 15, 20],
+            fov: 60,
+            near: 0.1,
+            far: 1000
+          }}
+          gl={{
+            antialias: true,
+            powerPreference: "default"
+          }}
+        >
+          <Scene />
+        </Canvas>
+      </ErrorBoundary>
       <GameUI />
+      <GForceDisplay />
     </div>
   );
 }

@@ -74,23 +74,71 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
   
   if (mode === "ride") return null;
   
-  // Scale factor to match the track size
   const POINT_SCALE = 0.6;
+  
+  // Dynamic colors based on state
+  const getColor = () => {
+    if (isSelected) return "#FF6B35";
+    if (isFirst) return "#00E676";
+    if (isLast) return "#FF1744";
+    return "#448AFF";
+  };
+  
+  const getEmissive = () => {
+    if (isSelected) return "#FF3D00";
+    if (isFirst) return "#00C853";
+    if (isLast) return "#D50000";
+    return "#2962FF";
+  };
   
   return (
     <group>
+      {/* Outer glow ring */}
+      <mesh position={[position.x, position.y, position.z]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[0.4 * POINT_SCALE, 0.55 * POINT_SCALE, 24]} />
+        <meshBasicMaterial 
+          color={getEmissive()} 
+          transparent 
+          opacity={isSelected ? 0.8 : 0.4} 
+        />
+      </mesh>
+      
+      {/* Main point sphere */}
       <mesh
         ref={meshRef}
         position={[position.x, position.y, position.z]}
         onClick={handleClick}
+        castShadow
       >
-        <sphereGeometry args={[0.5 * POINT_SCALE, 16, 16]} />
+        <sphereGeometry args={[0.4 * POINT_SCALE, 24, 24]} />
         <meshStandardMaterial
-          color={isSelected ? "#ff6600" : isFirst ? "#22cc44" : isLast ? "#ee3333" : "#4488ff"}
-          emissive={isSelected ? "#ff3300" : isFirst ? "#115522" : isLast ? "#661111" : "#000000"}
-          emissiveIntensity={0.3}
+          color={getColor()}
+          emissive={getEmissive()}
+          emissiveIntensity={isSelected ? 0.6 : 0.3}
+          metalness={0.5}
+          roughness={0.3}
         />
       </mesh>
+      
+      {/* Point index label */}
+      <Html position={[position.x, position.y + 0.8, position.z]} center distanceFactor={20}>
+        <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-lg ${
+          isSelected ? 'bg-orange-500 text-white' : 
+          isFirst ? 'bg-green-500 text-white' : 
+          isLast ? 'bg-red-500 text-white' : 
+          'bg-blue-500/80 text-white'
+        }`}>
+          {index + 1}
+        </div>
+      </Html>
+      
+      {/* Vertical guide line to ground */}
+      {position.y > 0.5 && (
+        <mesh position={[position.x, position.y / 2, position.z]}>
+          <cylinderGeometry args={[0.02, 0.02, position.y, 4]} />
+          <meshBasicMaterial color={getColor()} transparent opacity={0.3} />
+        </mesh>
+      )}
       
       {isSelected && meshReady && meshRef.current && (
         <>
@@ -104,13 +152,18 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
             showZ={true}
           />
           
-          <Html position={[position.x, position.y + 1.5, position.z]} center>
+          <Html position={[position.x, position.y + 1.8, position.z]} center>
             <div 
-              className="bg-black/80 text-white p-2 rounded text-xs whitespace-nowrap"
-              style={{ pointerEvents: 'auto' }}
+              className="glass-panel text-white p-3 rounded-xl text-xs whitespace-nowrap shadow-2xl border border-orange-500/30"
+              style={{ 
+                pointerEvents: 'auto',
+                background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9))',
+                backdropFilter: 'blur(10px)'
+              }}
             >
-              <div className="flex items-center gap-2">
-                <span>Tilt:</span>
+              <div className="text-[10px] text-slate-400 mb-2 font-semibold">Point {index + 1} Tilt</div>
+              <div className="flex items-center gap-3">
+                <span className="text-orange-400">↶</span>
                 <input
                   type="range"
                   min="-45"
@@ -118,9 +171,10 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
                   step="5"
                   value={tilt}
                   onChange={handleTiltChange}
-                  className="w-20 h-2 cursor-pointer"
+                  className="w-24 h-2 cursor-pointer"
                 />
-                <span className="w-8">{tilt}°</span>
+                <span className="text-orange-400">↷</span>
+                <span className="w-10 text-center font-bold text-orange-400 bg-orange-500/20 px-2 py-1 rounded">{tilt}°</span>
               </div>
             </div>
           </Html>

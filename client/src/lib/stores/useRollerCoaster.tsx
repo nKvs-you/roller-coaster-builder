@@ -1,7 +1,15 @@
 import { create } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
 import * as THREE from "three";
 
 export type CoasterMode = "build" | "ride" | "preview";
+
+// History entry for undo/redo
+interface HistoryEntry {
+  trackPoints: SerializedTrackPoint[];
+  loopSegments: SerializedLoopSegment[];
+  isLooped: boolean;
+}
 
 // Loop segment descriptor - stored separately from track points
 // The actual loop frame (forward, up, right) is computed at runtime from the spline
@@ -124,14 +132,24 @@ interface RollerCoasterState {
   savedCoasters: SavedCoaster[];
   currentCoasterName: string | null;
   
+  // Undo/redo state
+  history: HistoryEntry[];
+  historyIndex: number;
+  maxHistorySize: number;
+  
   setMode: (mode: CoasterMode) => void;
   setCameraTarget: (target: THREE.Vector3 | null) => void;
   addTrackPoint: (position: THREE.Vector3) => void;
+  insertTrackPointAfter: (afterId: string, position: THREE.Vector3) => void;
+  duplicateTrackPoint: (id: string) => void;
   updateTrackPoint: (id: string, position: THREE.Vector3) => void;
   updateTrackPointTilt: (id: string, tilt: number) => void;
   removeTrackPoint: (id: string) => void;
   createLoopAtPoint: (id: string) => void;
+  removeLoopAtPoint: (id: string) => void;
   selectPoint: (id: string | null) => void;
+  selectNextPoint: () => void;
+  selectPrevPoint: () => void;
   clearTrack: () => void;
   setRideProgress: (progress: number) => void;
   setIsRiding: (riding: boolean) => void;
@@ -145,6 +163,13 @@ interface RollerCoasterState {
   startRide: () => void;
   stopRide: () => void;
   
+  // Undo/redo functions
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  pushHistory: () => void;
+  
   // Save/Load functionality
   saveCoaster: (name: string) => void;
   loadCoaster: (id: string) => void;
@@ -156,7 +181,21 @@ interface RollerCoasterState {
 
 let pointCounter = 0;
 
-export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
+// Helper to create initial history entry
+function createHistoryEntry(state: { 
+  trackPoints: TrackPoint[]; 
+  loopSegments: LoopSegment[]; 
+  isLooped: boolean 
+}): HistoryEntry {
+  return {
+    trackPoints: state.trackPoints.map(serializeTrackPoint),
+    loopSegments: state.loopSegments.map(serializeLoopSegment),
+    isLooped: state.isLooped,
+  };
+}
+
+export const useRollerCoaster = create<RollerCoasterState>()(
+  subscribeWithSelector((set, get) => ({
   mode: "build",
   trackPoints: [],
   loopSegments: [],
@@ -173,6 +212,11 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   cameraTarget: null,
   savedCoasters: loadSavedCoasters(),
   currentCoasterName: null,
+  
+  // Undo/redo state
+  history: [],
+  historyIndex: -1,
+  maxHistorySize: 50,
   
   setMode: (mode) => set({ mode }),
   
@@ -191,6 +235,8 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   setIsNightMode: (night) => set({ isNightMode: night }),
   
   addTrackPoint: (position) => {
+    const state = get();
+    state.pushHistory();
     const id = `point-${++pointCounter}`;
     set((state) => ({
       trackPoints: [...state.trackPoints, { id, position: position.clone(), tilt: 0 }],
@@ -198,6 +244,7 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   },
   
   updateTrackPoint: (id, position) => {
+    // Don't push history on every drag update - it's done on drag end
     set((state) => ({
       trackPoints: state.trackPoints.map((point) =>
         point.id === id ? { ...point, position: position.clone() } : point
@@ -206,6 +253,8 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   },
   
   updateTrackPointTilt: (id, tilt) => {
+    const state = get();
+    state.pushHistory();
     set((state) => ({
       trackPoints: state.trackPoints.map((point) =>
         point.id === id ? { ...point, tilt } : point
@@ -214,13 +263,18 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   },
   
   removeTrackPoint: (id) => {
+    const state = get();
+    state.pushHistory();
     set((state) => ({
       trackPoints: state.trackPoints.filter((point) => point.id !== id),
+      loopSegments: state.loopSegments.filter((seg) => seg.entryPointId !== id),
       selectedPointId: state.selectedPointId === id ? null : state.selectedPointId,
     }));
   },
   
   createLoopAtPoint: (id) => {
+    const currentState = get();
+    currentState.pushHistory();
     set((state) => {
       const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
       if (pointIndex === -1) return state;
@@ -249,10 +303,108 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
     });
   },
   
+  removeLoopAtPoint: (id) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const point = state.trackPoints.find((p) => p.id === id);
+      if (!point || !point.hasLoop) return state;
+      
+      return {
+        trackPoints: state.trackPoints.map((p) =>
+          p.id === id ? { ...p, hasLoop: false } : p
+        ),
+        loopSegments: state.loopSegments.filter((seg) => seg.entryPointId !== id),
+      };
+    });
+  },
+  
+  insertTrackPointAfter: (afterId, position) => {
+    const state = get();
+    state.pushHistory();
+    const id = `point-${++pointCounter}`;
+    set((state) => {
+      const index = state.trackPoints.findIndex((p) => p.id === afterId);
+      if (index === -1) {
+        return { trackPoints: [...state.trackPoints, { id, position: position.clone(), tilt: 0 }] };
+      }
+      const newPoints = [...state.trackPoints];
+      newPoints.splice(index + 1, 0, { id, position: position.clone(), tilt: 0 });
+      return { trackPoints: newPoints, selectedPointId: id };
+    });
+  },
+  
+  duplicateTrackPoint: (id) => {
+    const state = get();
+    state.pushHistory();
+    const newId = `point-${++pointCounter}`;
+    set((state) => {
+      const index = state.trackPoints.findIndex((p) => p.id === id);
+      if (index === -1) return state;
+      
+      const sourcePoint = state.trackPoints[index];
+      const nextPoint = state.trackPoints[index + 1];
+      
+      // Calculate offset position - either towards next point or along tangent
+      let newPosition: THREE.Vector3;
+      if (nextPoint) {
+        // Place between current and next
+        newPosition = sourcePoint.position.clone().lerp(nextPoint.position, 0.5);
+      } else {
+        // Place 3 units in the direction of the previous tangent
+        const prevPoint = state.trackPoints[index - 1];
+        if (prevPoint) {
+          const dir = sourcePoint.position.clone().sub(prevPoint.position).normalize();
+          newPosition = sourcePoint.position.clone().add(dir.multiplyScalar(3));
+        } else {
+          newPosition = sourcePoint.position.clone().add(new THREE.Vector3(3, 0, 0));
+        }
+      }
+      
+      const newPoints = [...state.trackPoints];
+      newPoints.splice(index + 1, 0, { 
+        id: newId, 
+        position: newPosition, 
+        tilt: sourcePoint.tilt 
+      });
+      return { trackPoints: newPoints, selectedPointId: newId };
+    });
+  },
+  
   selectPoint: (id) => set({ selectedPointId: id }),
   
+  selectNextPoint: () => {
+    const state = get();
+    if (state.trackPoints.length === 0) return;
+    
+    if (!state.selectedPointId) {
+      set({ selectedPointId: state.trackPoints[0].id });
+      return;
+    }
+    
+    const currentIndex = state.trackPoints.findIndex((p) => p.id === state.selectedPointId);
+    const nextIndex = (currentIndex + 1) % state.trackPoints.length;
+    set({ selectedPointId: state.trackPoints[nextIndex].id });
+  },
+  
+  selectPrevPoint: () => {
+    const state = get();
+    if (state.trackPoints.length === 0) return;
+    
+    if (!state.selectedPointId) {
+      set({ selectedPointId: state.trackPoints[state.trackPoints.length - 1].id });
+      return;
+    }
+    
+    const currentIndex = state.trackPoints.findIndex((p) => p.id === state.selectedPointId);
+    const prevIndex = currentIndex <= 0 ? state.trackPoints.length - 1 : currentIndex - 1;
+    set({ selectedPointId: state.trackPoints[prevIndex].id });
+  },
+  
   clearTrack: () => {
-    set({ trackPoints: [], loopSegments: [], selectedPointId: null, rideProgress: 0, isRiding: false });
+    const state = get();
+    state.pushHistory();
+    set({ trackPoints: [], loopSegments: [], selectedPointId: null, rideProgress: 0, isRiding: false, history: [], historyIndex: -1 });
   },
   
   setRideProgress: (progress) => set({ rideProgress: progress }),
@@ -392,5 +544,85 @@ export const useRollerCoaster = create<RollerCoasterState>((set, get) => ({
   
   refreshSavedCoasters: () => {
     set({ savedCoasters: loadSavedCoasters() });
+  },
+  
+  // Undo/redo functionality
+  pushHistory: () => {
+    const state = get();
+    const entry = createHistoryEntry(state);
+    
+    // Remove any future history if we're not at the end
+    const newHistory = state.history.slice(0, state.historyIndex + 1);
+    newHistory.push(entry);
+    
+    // Limit history size
+    while (newHistory.length > state.maxHistorySize) {
+      newHistory.shift();
+    }
+    
+    set({ 
+      history: newHistory, 
+      historyIndex: newHistory.length - 1 
+    });
+  },
+  
+  canUndo: () => {
+    const state = get();
+    return state.historyIndex >= 0;
+  },
+  
+  canRedo: () => {
+    const state = get();
+    return state.historyIndex < state.history.length - 1;
+  },
+  
+  undo: () => {
+    const state = get();
+    if (state.historyIndex < 0) return;
+    
+    const entry = state.history[state.historyIndex];
+    const trackPoints = entry.trackPoints.map(deserializeTrackPoint);
+    const loopSegments = entry.loopSegments.map(deserializeLoopSegment);
+    
+    // Update pointCounter to avoid collisions
+    const maxId = trackPoints.reduce((max, p) => {
+      const num = parseInt(p.id.replace('point-', ''), 10);
+      return isNaN(num) ? max : Math.max(max, num);
+    }, pointCounter);
+    pointCounter = maxId;
+    
+    set({
+      trackPoints,
+      loopSegments,
+      isLooped: entry.isLooped,
+      historyIndex: state.historyIndex - 1,
+      selectedPointId: null,
+    });
+  },
+  
+  redo: () => {
+    const state = get();
+    if (state.historyIndex >= state.history.length - 1) return;
+    
+    const entry = state.history[state.historyIndex + 2] || state.history[state.historyIndex + 1];
+    if (!entry) return;
+    
+    const trackPoints = entry.trackPoints.map(deserializeTrackPoint);
+    const loopSegments = entry.loopSegments.map(deserializeLoopSegment);
+    
+    // Update pointCounter
+    const maxId = trackPoints.reduce((max, p) => {
+      const num = parseInt(p.id.replace('point-', ''), 10);
+      return isNaN(num) ? max : Math.max(max, num);
+    }, pointCounter);
+    pointCounter = maxId;
+    
+    set({
+      trackPoints,
+      loopSegments,
+      isLooped: entry.isLooped,
+      historyIndex: state.historyIndex + 1,
+      selectedPointId: null,
+    });
   },
 }));

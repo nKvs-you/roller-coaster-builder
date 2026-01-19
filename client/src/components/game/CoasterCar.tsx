@@ -3,111 +3,13 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { useRollerCoaster, LoopSegment } from "@/lib/stores/useRollerCoaster";
 import { getTrackCurve } from "./Track";
-
-interface TrackSection {
-  type: "spline" | "roll";
-  startProgress: number;
-  endProgress: number;
-  arcLength: number;
-  rollFrame?: BarrelRollFrame;
-  splineStartT?: number;
-  splineEndT?: number;
-  pointIndex?: number;
-}
-
-interface BarrelRollFrame {
-  entryPos: THREE.Vector3;
-  forward: THREE.Vector3;
-  up: THREE.Vector3;
-  right: THREE.Vector3;
-  radius: number;
-  pitch: number;
-}
-
-// Vertical loop with corkscrew offset to prevent self-intersection
-function sampleVerticalLoopAnalytically(
-  frame: BarrelRollFrame,
-  t: number
-): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3 } {
-  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
-  
-  const twoPi = Math.PI * 2;
-  const corkscrewOffset = radius * 0.4;
-  
-  const theta = twoPi * (t - Math.sin(twoPi * t) / twoPi);
-  const dThetaDt = twoPi * (1 - Math.cos(twoPi * t));
-  
-  // Vertical loop with lateral corkscrew offset
-  const point = new THREE.Vector3()
-    .copy(entryPos)
-    .addScaledVector(forward, pitch * t + radius * Math.sin(theta))
-    .addScaledVector(U0, radius * (1 - Math.cos(theta)))
-    .addScaledVector(R0, corkscrewOffset * Math.sin(theta));
-  
-  const tangent = new THREE.Vector3()
-    .copy(forward).multiplyScalar(pitch + radius * Math.cos(theta) * dThetaDt)
-    .addScaledVector(U0, radius * Math.sin(theta) * dThetaDt)
-    .addScaledVector(R0, corkscrewOffset * Math.cos(theta) * dThetaDt)
-    .normalize();
-  
-  // Up rotates around right axis - upside down at θ=π
-  const rotatedUp = new THREE.Vector3()
-    .addScaledVector(U0, Math.cos(theta))
-    .addScaledVector(forward, -Math.sin(theta))
-    .normalize();
-  
-  return { point, tangent, up: rotatedUp };
-}
-
-function computeRollFrame(
-  spline: THREE.CatmullRomCurve3,
-  splineT: number,
-  radius: number,
-  pitch: number,
-  rollOffset: THREE.Vector3
-): BarrelRollFrame {
-  const entryPos = spline.getPoint(splineT).add(rollOffset);
-  const forward = spline.getTangent(splineT).normalize();
-  
-  // Use WORLD up to build roll frame - keeps roll horizontal and going UP first
-  const worldUp = new THREE.Vector3(0, 1, 0);
-  let entryUp = worldUp.clone();
-  const upDot = entryUp.dot(forward);
-  entryUp.sub(forward.clone().multiplyScalar(upDot));
-  if (entryUp.length() > 0.001) {
-    entryUp.normalize();
-  } else {
-    entryUp.set(1, 0, 0);
-    const d = entryUp.dot(forward);
-    entryUp.sub(forward.clone().multiplyScalar(d)).normalize();
-  }
-  
-  const right = new THREE.Vector3().crossVectors(forward, entryUp).normalize();
-  
-  return { entryPos, forward, up: entryUp, right, radius, pitch };
-}
-
-function computeRollArcLength(radius: number, pitch: number): number {
-  const steps = 100;
-  let length = 0;
-  const twoPi = Math.PI * 2;
-  
-  for (let i = 0; i < steps; i++) {
-    const t1 = i / steps;
-    const t2 = (i + 1) / steps;
-    
-    const theta1 = twoPi * (t1 - Math.sin(twoPi * t1) / twoPi);
-    const theta2 = twoPi * (t2 - Math.sin(twoPi * t2) / twoPi);
-    const dTheta = theta2 - theta1;
-    
-    const dForward = pitch / steps;
-    const dRadial = radius * Math.sqrt(dTheta * dTheta);
-    
-    length += Math.sqrt(dForward * dForward + dRadial * dRadial);
-  }
-  
-  return length;
-}
+import { 
+  sampleVerticalLoopAnalytically,
+  computeRollFrame,
+  computeRollArcLength,
+  type TrackSection,
+  type BarrelRollFrame,
+} from "@/lib/trackUtils";
 
 function sampleHybridTrack(
   progress: number,
@@ -303,7 +205,7 @@ export function CoasterCar() {
     const { point: position, tangent, up } = sample;
     
     meshRef.current.position.copy(position);
-    meshRef.current.position.addScaledVector(up, -0.18); // Scaled down offset (0.3 * 0.6)
+    meshRef.current.position.addScaledVector(up, -0.18);
     
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
     const matrix = new THREE.Matrix4().makeBasis(right, up, tangent);
@@ -314,34 +216,93 @@ export function CoasterCar() {
   
   if (!isRiding || mode !== "ride") return null;
   
-  // Scale factor to match the track size - smaller car for a smaller track
   const CAR_SCALE = 0.6;
   
   return (
     <group ref={meshRef} scale={[CAR_SCALE, CAR_SCALE, CAR_SCALE]}>
-      <mesh position={[0, 0, 0]}>
-        <boxGeometry args={[1, 0.5, 2]} />
-        <meshStandardMaterial color="#ff0000" metalness={0.7} roughness={0.3} />
+      {/* Main car body - sleek design */}
+      <mesh position={[0, 0.1, 0]} castShadow>
+        <boxGeometry args={[1.1, 0.4, 2.2]} />
+        <meshStandardMaterial 
+          color="#E53935" 
+          metalness={0.8} 
+          roughness={0.2}
+        />
       </mesh>
-      <mesh position={[0, 0.4, -0.5]}>
-        <boxGeometry args={[0.8, 0.3, 0.6]} />
-        <meshStandardMaterial color="#333333" />
+      
+      {/* Front nose - aerodynamic */}
+      <mesh position={[0, 0.15, 1.3]} castShadow>
+        <boxGeometry args={[0.9, 0.3, 0.5]} />
+        <meshStandardMaterial color="#C62828" metalness={0.8} roughness={0.2} />
       </mesh>
-      <mesh position={[-0.5, -0.35, 0.6]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.1, 16]} />
-        <meshStandardMaterial color="#222222" metalness={0.8} />
+      
+      {/* Cockpit/seat back */}
+      <mesh position={[0, 0.45, -0.4]} castShadow>
+        <boxGeometry args={[0.9, 0.4, 0.8]} />
+        <meshStandardMaterial color="#212121" roughness={0.6} />
       </mesh>
-      <mesh position={[0.5, -0.35, 0.6]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.1, 16]} />
-        <meshStandardMaterial color="#222222" metalness={0.8} />
+      
+      {/* Windshield */}
+      <mesh position={[0, 0.5, 0.3]} rotation={[-0.4, 0, 0]} castShadow>
+        <boxGeometry args={[0.85, 0.02, 0.5]} />
+        <meshStandardMaterial color="#4FC3F7" metalness={0.9} roughness={0.1} transparent opacity={0.7} />
       </mesh>
-      <mesh position={[-0.5, -0.35, -0.6]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.1, 16]} />
-        <meshStandardMaterial color="#222222" metalness={0.8} />
+      
+      {/* Side rails */}
+      <mesh position={[0.55, 0.35, 0]} castShadow>
+        <boxGeometry args={[0.08, 0.15, 1.8]} />
+        <meshStandardMaterial color="#FF5722" metalness={0.7} roughness={0.3} />
       </mesh>
-      <mesh position={[0.5, -0.35, -0.6]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.15, 0.15, 0.1, 16]} />
-        <meshStandardMaterial color="#222222" metalness={0.8} />
+      <mesh position={[-0.55, 0.35, 0]} castShadow>
+        <boxGeometry args={[0.08, 0.15, 1.8]} />
+        <meshStandardMaterial color="#FF5722" metalness={0.7} roughness={0.3} />
+      </mesh>
+      
+      {/* Headlights */}
+      <mesh position={[0.3, 0.15, 1.55]}>
+        <sphereGeometry args={[0.08, 12, 12]} />
+        <meshBasicMaterial color="#FFF59D" />
+      </mesh>
+      <mesh position={[-0.3, 0.15, 1.55]}>
+        <sphereGeometry args={[0.08, 12, 12]} />
+        <meshBasicMaterial color="#FFF59D" />
+      </mesh>
+      
+      {/* Tail lights */}
+      <mesh position={[0.35, 0.2, -1.1]}>
+        <boxGeometry args={[0.12, 0.1, 0.05]} />
+        <meshBasicMaterial color="#FF1744" />
+      </mesh>
+      <mesh position={[-0.35, 0.2, -1.1]}>
+        <boxGeometry args={[0.12, 0.1, 0.05]} />
+        <meshBasicMaterial color="#FF1744" />
+      </mesh>
+      
+      {/* Wheels with rims */}
+      {[
+        [-0.5, -0.2, 0.7],
+        [0.5, -0.2, 0.7],
+        [-0.5, -0.2, -0.7],
+        [0.5, -0.2, -0.7],
+      ].map((pos, i) => (
+        <group key={i} position={[pos[0], pos[1], pos[2]]}>
+          {/* Tire */}
+          <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+            <cylinderGeometry args={[0.18, 0.18, 0.12, 16]} />
+            <meshStandardMaterial color="#1A1A1A" roughness={0.9} />
+          </mesh>
+          {/* Rim */}
+          <mesh rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.1, 0.1, 0.13, 8]} />
+            <meshStandardMaterial color="#B0BEC5" metalness={0.9} roughness={0.1} />
+          </mesh>
+        </group>
+      ))}
+      
+      {/* Racing stripes */}
+      <mesh position={[0, 0.31, 0]}>
+        <boxGeometry args={[0.15, 0.01, 2.0]} />
+        <meshStandardMaterial color="#FFFFFF" roughness={0.5} />
       </mesh>
     </group>
   );

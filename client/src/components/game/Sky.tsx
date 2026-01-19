@@ -187,28 +187,80 @@ export function Sky() {
   
   return (
     <>
-      <color attach="background" args={["#87CEEB"]} />
-      <fog attach="fog" args={["#87CEEB", 100, 400]} />
+      {/* Beautiful gradient sky */}
+      <color attach="background" args={["#7EC8E3"]} />
+      <fog attach="fog" args={["#B8E1FF", 150, 500]} />
       
-      <mesh position={[50, 40, -50]}>
-        <sphereGeometry args={[8, 32, 32]} />
-        <meshBasicMaterial color="#FFFF88" />
-      </mesh>
+      {/* Sun with glow effect */}
+      <group position={[80, 60, -80]}>
+        {/* Sun glow */}
+        <mesh>
+          <sphereGeometry args={[20, 32, 32]} />
+          <meshBasicMaterial color="#FFF8E1" transparent opacity={0.3} />
+        </mesh>
+        <mesh>
+          <sphereGeometry args={[12, 32, 32]} />
+          <meshBasicMaterial color="#FFEB3B" transparent opacity={0.5} />
+        </mesh>
+        {/* Sun core */}
+        <mesh>
+          <sphereGeometry args={[6, 32, 32]} />
+          <meshBasicMaterial color="#FFF59D" />
+        </mesh>
+      </group>
       
-      <ambientLight intensity={0.4} />
+      {/* Clouds */}
+      {[
+        { pos: [-100, 80, -150], scale: 1.2 },
+        { pos: [50, 90, -200], scale: 1.5 },
+        { pos: [150, 70, -100], scale: 1.0 },
+        { pos: [-50, 85, -180], scale: 0.8 },
+        { pos: [120, 95, -220], scale: 1.3 },
+      ].map((cloud, i) => (
+        <group key={`cloud-${i}`} position={[cloud.pos[0], cloud.pos[1], cloud.pos[2]]} scale={cloud.scale}>
+          <mesh position={[0, 0, 0]}>
+            <sphereGeometry args={[8, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.9} />
+          </mesh>
+          <mesh position={[10, -2, 0]}>
+            <sphereGeometry args={[6, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.9} />
+          </mesh>
+          <mesh position={[-8, -1, 2]}>
+            <sphereGeometry args={[7, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.9} />
+          </mesh>
+          <mesh position={[5, 3, -2]}>
+            <sphereGeometry args={[5, 16, 16]} />
+            <meshBasicMaterial color="#ffffff" transparent opacity={0.9} />
+          </mesh>
+        </group>
+      ))}
+      
+      {/* Enhanced lighting */}
+      <ambientLight intensity={0.5} color="#E3F2FD" />
       <directionalLight
-        position={[50, 50, 25]}
-        intensity={1}
+        position={[80, 60, -80]}
+        intensity={1.2}
+        color="#FFF8E1"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
-        shadow-camera-far={200}
-        shadow-camera-left={-100}
-        shadow-camera-right={100}
-        shadow-camera-top={100}
-        shadow-camera-bottom={-100}
+        shadow-mapSize-width={4096}
+        shadow-mapSize-height={4096}
+        shadow-camera-far={300}
+        shadow-camera-left={-150}
+        shadow-camera-right={150}
+        shadow-camera-top={150}
+        shadow-camera-bottom={-150}
+        shadow-bias={-0.0001}
       />
-      <hemisphereLight args={["#87CEEB", "#228B22", 0.3]} />
+      <hemisphereLight args={["#87CEEB", "#4CAF50", 0.4]} />
+      
+      {/* Subtle fill light */}
+      <directionalLight
+        position={[-50, 30, 50]}
+        intensity={0.3}
+        color="#B3E5FC"
+      />
     </>
   );
 }

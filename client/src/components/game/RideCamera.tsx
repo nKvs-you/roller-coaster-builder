@@ -3,113 +3,13 @@ import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import { useRollerCoaster, LoopSegment } from "@/lib/stores/useRollerCoaster";
 import { getTrackCurve } from "./Track";
-
-interface TrackSection {
-  type: "spline" | "roll";
-  startProgress: number;
-  endProgress: number;
-  arcLength: number;
-  rollFrame?: BarrelRollFrame;
-  splineStartT?: number;
-  splineEndT?: number;
-  pointIndex?: number;
-}
-
-interface BarrelRollFrame {
-  entryPos: THREE.Vector3;
-  forward: THREE.Vector3;
-  up: THREE.Vector3;
-  right: THREE.Vector3;
-  radius: number;
-  pitch: number;
-}
-
-// Vertical loop with corkscrew offset to prevent self-intersection
-function sampleVerticalLoopAnalytically(
-  frame: BarrelRollFrame,
-  t: number
-): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3 } {
-  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
-  
-  const twoPi = Math.PI * 2;
-  const corkscrewOffset = radius * 0.4;
-  
-  const theta = twoPi * (t - Math.sin(twoPi * t) / twoPi);
-  const dThetaDt = twoPi * (1 - Math.cos(twoPi * t));
-  
-  // Vertical loop with lateral corkscrew offset
-  const point = new THREE.Vector3()
-    .copy(entryPos)
-    .addScaledVector(forward, pitch * t + radius * Math.sin(theta))
-    .addScaledVector(U0, radius * (1 - Math.cos(theta)))
-    .addScaledVector(R0, corkscrewOffset * Math.sin(theta));
-  
-  const tangent = new THREE.Vector3()
-    .copy(forward).multiplyScalar(pitch + radius * Math.cos(theta) * dThetaDt)
-    .addScaledVector(U0, radius * Math.sin(theta) * dThetaDt)
-    .addScaledVector(R0, corkscrewOffset * Math.cos(theta) * dThetaDt)
-    .normalize();
-  
-  // Up rotates around right axis - upside down at θ=π
-  const rotatedUp = new THREE.Vector3()
-    .addScaledVector(U0, Math.cos(theta))
-    .addScaledVector(forward, -Math.sin(theta))
-    .normalize();
-  
-  return { point, tangent, up: rotatedUp };
-}
-
-function computeRollFrame(
-  spline: THREE.CatmullRomCurve3,
-  splineT: number,
-  radius: number,
-  pitch: number,
-  rollOffset: THREE.Vector3
-): BarrelRollFrame {
-  const entryPos = spline.getPoint(splineT).add(rollOffset);
-  const forward = spline.getTangent(splineT).normalize();
-  
-  // Use WORLD up to build roll frame - keeps roll horizontal and going UP first
-  const worldUp = new THREE.Vector3(0, 1, 0);
-  let entryUp = worldUp.clone();
-  const upDot = entryUp.dot(forward);
-  entryUp.sub(forward.clone().multiplyScalar(upDot));
-  if (entryUp.length() > 0.001) {
-    entryUp.normalize();
-  } else {
-    entryUp.set(1, 0, 0);
-    const d = entryUp.dot(forward);
-    entryUp.sub(forward.clone().multiplyScalar(d)).normalize();
-  }
-  
-  const right = new THREE.Vector3().crossVectors(forward, entryUp).normalize();
-  
-  return { entryPos, forward, up: entryUp, right, radius, pitch };
-}
-
-// Compute arc length of eased barrel roll numerically
-function computeRollArcLength(radius: number, pitch: number): number {
-  const steps = 100;
-  let length = 0;
-  const twoPi = Math.PI * 2;
-  
-  for (let i = 0; i < steps; i++) {
-    const t1 = i / steps;
-    const t2 = (i + 1) / steps;
-    
-    const theta1 = twoPi * (t1 - Math.sin(twoPi * t1) / twoPi);
-    const theta2 = twoPi * (t2 - Math.sin(twoPi * t2) / twoPi);
-    const dTheta = theta2 - theta1;
-    
-    // Approximate position change
-    const dForward = pitch / steps;
-    const dRadial = radius * Math.sqrt(dTheta * dTheta);
-    
-    length += Math.sqrt(dForward * dForward + dRadial * dRadial);
-  }
-  
-  return length;
-}
+import { 
+  sampleVerticalLoopAnalytically,
+  computeRollFrame,
+  computeRollArcLength,
+  type TrackSection,
+  type BarrelRollFrame,
+} from "@/lib/trackUtils";
 
 export function RideCamera() {
   const { camera } = useThree();
@@ -118,6 +18,8 @@ export function RideCamera() {
   const curveRef = useRef<THREE.CatmullRomCurve3 | null>(null);
   const previousCameraPos = useRef(new THREE.Vector3());
   const previousLookAt = useRef(new THREE.Vector3());
+  const previousUp = useRef(new THREE.Vector3(0, 1, 0));
+  const smoothedUp = useRef(new THREE.Vector3(0, 1, 0));
   const maxHeightReached = useRef(0);
   const transportedUp = useRef(new THREE.Vector3(0, 1, 0));
   const lastProgress = useRef(0);
@@ -309,7 +211,13 @@ export function RideCamera() {
     // This keeps the camera aligned with the track geometry
     lastProgress.current = newProgress;
     
-    const baseUpVector = sampleUp.clone();
+    // Smooth the up vector for less jarring camera movement
+    // Use slower smoothing during rolls for dramatic effect
+    const upSmoothFactor = inRoll ? 0.15 : 0.3;
+    smoothedUp.current.lerp(sampleUp, upSmoothFactor);
+    smoothedUp.current.normalize();
+    
+    const baseUpVector = smoothedUp.current.clone();
     
     // Higher camera position to enhance the feeling of sitting on top of the coaster
     const cameraHeight = 2.5;
@@ -323,8 +231,13 @@ export function RideCamera() {
       .add(tangent.clone().multiplyScalar(lookDistance))
       .add(baseUpVector.clone().multiplyScalar(lookDownOffset));
     
-    previousCameraPos.current.lerp(targetCameraPos, 0.5);
-    previousLookAt.current.lerp(targetLookAt, 0.5);
+    // Use speed-based smoothing - faster movement = less smoothing for responsiveness
+    const baseSmoothFactor = 0.4;
+    const speedFactor = Math.min(1.0, speed / 15.0);
+    const smoothFactor = baseSmoothFactor + (0.3 * speedFactor);
+    
+    previousCameraPos.current.lerp(targetCameraPos, smoothFactor);
+    previousLookAt.current.lerp(targetLookAt, smoothFactor * 0.8);
     
     camera.position.copy(previousCameraPos.current);
     
