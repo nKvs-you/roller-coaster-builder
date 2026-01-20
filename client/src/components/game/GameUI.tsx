@@ -105,7 +105,12 @@ function Section({
   );
 }
 
-export function GameUI() {
+interface GameUIProps {
+  use2DMode?: boolean;
+  onToggle2DMode?: () => void;
+}
+
+export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
   // Enable keyboard shortcuts
   useKeyboardShortcuts();
   const {
@@ -518,6 +523,33 @@ export function GameUI() {
                     🎢 Start Ride
                   </Button>
                 </Tooltip>
+                
+                {/* 2D Mode Toggle */}
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/50 border border-white/5">
+                  <button
+                    onClick={onToggle2DMode}
+                    className={`flex-1 h-7 text-[10px] px-2 rounded font-medium transition-all ${
+                      !use2DMode 
+                        ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white' 
+                        : 'bg-transparent text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    🎮 3D Mode
+                  </button>
+                  <button
+                    onClick={onToggle2DMode}
+                    className={`flex-1 h-7 text-[10px] px-2 rounded font-medium transition-all ${
+                      use2DMode 
+                        ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white' 
+                        : 'bg-transparent text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    📺 2D Mode
+                  </button>
+                </div>
+                <div className="text-[9px] text-slate-500 text-center -mt-1">
+                  Press F2 to toggle • 2D works without WebGL
+                </div>
                 
                 <div className="flex gap-2">
                   <Tooltip text="Save to browser storage">

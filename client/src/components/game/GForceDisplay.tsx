@@ -210,7 +210,7 @@ function GForceMeter({ vertical, lateral }: { vertical: number; lateral: number 
 
 export function GForceDisplay() {
   const { isRiding, rideProgress } = useRollerCoaster();
-  const { physicsData, isWasmLoaded } = usePhysicsSimulation();
+  const { physicsData, isSimulating } = usePhysicsSimulation();
   
   const [isExpanded, setIsExpanded] = useState(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -223,13 +223,13 @@ export function GForceDisplay() {
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <div className={`w-2 h-2 rounded-full ${isSimulating ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
             <span className="text-white text-xs font-bold">LIVE TELEMETRY</span>
           </div>
           <div className="flex gap-1">
-            {isWasmLoaded && (
-              <span className="text-[8px] text-emerald-400 bg-emerald-400/10 px-1.5 py-0.5 rounded">
-                WASM
+            {physicsData.isAirtime && (
+              <span className="text-[8px] text-purple-400 bg-purple-400/10 px-1.5 py-0.5 rounded">
+                AIRTIME
               </span>
             )}
             <button 
@@ -310,6 +310,15 @@ export function GForceDisplay() {
                   dangerThreshold={5}
                 />
                 <GForceGauge 
+                  value={physicsData.gForceLongitudinal}
+                  min={-3}
+                  max={3}
+                  label="Longitudinal G"
+                  unit="G"
+                  warningThreshold={1.5}
+                  dangerThreshold={2}
+                />
+                <GForceGauge 
                   value={physicsData.acceleration}
                   min={-20}
                   max={20}
@@ -329,6 +338,37 @@ export function GForceDisplay() {
                     <span className="text-white font-bold">
                       {physicsData.speedMph.toFixed(1)}
                     </span>
+                  </div>
+                  <div className="bg-slate-800/30 rounded p-2">
+                    <span className="text-slate-500 block">Track Grade</span>
+                    <span className="text-white font-bold">
+                      {physicsData.grade.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="bg-slate-800/30 rounded p-2">
+                    <span className="text-slate-500 block">Bank Angle</span>
+                    <span className="text-white font-bold">
+                      {(physicsData.bankAngle * 180 / Math.PI).toFixed(1)}°
+                    </span>
+                  </div>
+                </div>
+                
+                {/* Energy display */}
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[9px] text-slate-500 mb-1">Energy Conservation</div>
+                  <div className="h-3 bg-slate-800/50 rounded-full overflow-hidden flex">
+                    <div 
+                      className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-150"
+                      style={{ width: `${(physicsData.kineticEnergy / (physicsData.totalEnergy || 1)) * 100}%` }}
+                    />
+                    <div 
+                      className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-150"
+                      style={{ width: `${(physicsData.potentialEnergy / (physicsData.totalEnergy || 1)) * 100}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-[8px] mt-1">
+                    <span className="text-cyan-400">KE: {(physicsData.kineticEnergy / 1000).toFixed(1)} kJ</span>
+                    <span className="text-amber-400">PE: {(physicsData.potentialEnergy / 1000).toFixed(1)} kJ</span>
                   </div>
                 </div>
               </div>

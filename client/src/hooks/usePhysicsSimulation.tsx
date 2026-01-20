@@ -1,55 +1,90 @@
 /**
  * usePhysicsSimulation Hook
  * 
- * Integrates the C++ WASM physics engine with React/Three.js
- * Provides real-time physics simulation with fallback to JS implementation
+ * Provides accurate roller coaster physics simulation
+ * Pure JavaScript - no WASM or WebGL required for physics calculations
+ * 
+ * Physics features:
+ * - Energy conservation
+ * - Accurate G-force calculations
+ * - Centripetal force for curves
+ * - Air drag and rolling friction
+ * - Chain lift mechanics
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRollerCoaster, TrackPoint, LoopSegment } from '@/lib/stores/useRollerCoaster';
-import {
-  loadPhysicsEngine,
-  isWasmAvailable,
-  PhysicsSimulation,
-  validateTrackNative,
+import { 
+  RollerCoasterPhysics, 
+  TrackPointInput,
+  validateTrack as validateTrackPhysics,
+  ValidationIssue,
+  PHYSICS_CONSTANTS,
   PhysicsState,
-} from '@/lib/wasm/physicsEngine';
-
-// Physics constants (matching C++)
-const GRAVITY = 9.81;
-const AIR_RESISTANCE = 0.02;
-const ROLLING_FRICTION = 0.015;
-const CHAIN_LIFT_SPEED = 3.0;
+} from '@/lib/physics/PhysicsEngine';
 
 export interface PhysicsData {
+  // Speed
   speed: number;          // m/s
-  speedKmh: number;       // km/h
+  speedKmh: number;       // km/h  
   speedMph: number;       // mph
-  gForceVertical: number;
-  gForceLateral: number;
-  gForceTotal: number;
-  height: number;
+  
+  // G-forces
+  gForceVertical: number;   // Positive = pushed into seat
+  gForceLateral: number;    // Positive = pushed right
+  gForceLongitudinal: number; // Positive = pushed back (braking)
+  gForceTotal: number;      // Magnitude
+  
+  // Position
+  height: number;           // meters
+  progress: number;         // 0-1 along track
+  arcLength: number;        // meters traveled
+  
+  // Track geometry
+  grade: number;            // slope percentage
+  curvature: number;        // 1/radius (m⁻¹)
+  bankAngle: number;        // radians
+  
+  // State
   isOnChainLift: boolean;
   isInLoop: boolean;
-  acceleration: number;   // m/s²
-  kinematicEnergy: number; // simplified
-  potentialEnergy: number; // simplified
+  isAirtime: boolean;
+  isBraking: boolean;
+  
+  // Energy (for display/debugging)
+  kineticEnergy: number;    // Joules
+  potentialEnergy: number;  // Joules
+  totalEnergy: number;      // Joules
+  
+  // Acceleration
+  acceleration: number;     // m/s² (tangential)
 }
 
 export interface PhysicsSimulationResult {
-  isWasmLoaded: boolean;
+  // State
   isSimulating: boolean;
   physicsData: PhysicsData;
+  
+  // Validation
   validationErrors: Array<{
-    type: string;
+    type: 'error' | 'warning' | 'info';
     message: string;
-    severity: 'warning' | 'error';
+    severity: 'warning' | 'error' | 'info';
     pointIndex?: number;
+    value?: number;
   }>;
+  
+  // Controls
   startSimulation: () => void;
   stopSimulation: () => void;
   validateTrack: () => void;
+  
+  // Physics constants for UI
+  constants: typeof PHYSICS_CONSTANTS;
 }
+
+// Re-export PhysicsData type for other components
+export type { PhysicsState };
 
 const DEFAULT_PHYSICS: PhysicsData = {
   speed: 0,
@@ -57,99 +92,42 @@ const DEFAULT_PHYSICS: PhysicsData = {
   speedMph: 0,
   gForceVertical: 1.0,
   gForceLateral: 0,
+  gForceLongitudinal: 0,
   gForceTotal: 1.0,
   height: 0,
+  progress: 0,
+  arcLength: 0,
+  grade: 0,
+  curvature: 0,
+  bankAngle: 0,
   isOnChainLift: false,
   isInLoop: false,
-  acceleration: 0,
-  kinematicEnergy: 0,
+  isAirtime: false,
+  isBraking: false,
+  kineticEnergy: 0,
   potentialEnergy: 0,
+  totalEnergy: 0,
+  acceleration: 0,
 };
 
 /**
- * JavaScript fallback physics simulation
- * Used when WASM is not available
+ * Convert TrackPoint[] to TrackPointInput[] for physics engine
  */
-function simulatePhysicsJS(
-  trackPoints: TrackPoint[],
-  loopSegments: LoopSegment[],
-  progress: number,
-  speed: number,
-  hasChainLift: boolean,
-  isLooped: boolean,
-  dt: number
-): { newSpeed: number; gForce: number; height: number } {
-  if (trackPoints.length < 2) {
-    return { newSpeed: speed, gForce: 1.0, height: 0 };
-  }
-
-  // Find current height from progress
-  const numPoints = trackPoints.length;
-  const segmentCount = isLooped ? numPoints : numPoints - 1;
-  const scaledProgress = progress * segmentCount;
-  const index = Math.floor(scaledProgress);
-  const frac = scaledProgress - index;
-
-  let height = 0;
-  if (index < numPoints - 1) {
-    const h1 = trackPoints[index].position.y;
-    const h2 = trackPoints[Math.min(index + 1, numPoints - 1)].position.y;
-    height = h1 * (1 - frac) + h2 * frac;
-  } else {
-    height = trackPoints[numPoints - 1].position.y;
-  }
-
-  // Find first peak for chain lift
-  let firstPeakProgress = 0.2;
-  let maxHeight = trackPoints[0].position.y;
-  for (let i = 1; i < numPoints; i++) {
-    if (trackPoints[i].position.y > maxHeight) {
-      maxHeight = trackPoints[i].position.y;
-      firstPeakProgress = i / segmentCount;
-    }
-  }
-  firstPeakProgress = Math.min(0.5, Math.max(0.1, firstPeakProgress));
-
-  // Chain lift check
-  const onChainLift = hasChainLift && progress < firstPeakProgress;
-
-  let newSpeed = speed;
-
-  if (onChainLift) {
-    // Chain lift: constant speed
-    newSpeed = CHAIN_LIFT_SPEED;
-  } else {
-    // Calculate grade (slope)
-    let grade = 0;
-    if (index < numPoints - 1) {
-      const h1 = trackPoints[index].position.y;
-      const h2 = trackPoints[Math.min(index + 1, numPoints - 1)].position.y;
-      const p1 = trackPoints[index].position;
-      const p2 = trackPoints[Math.min(index + 1, numPoints - 1)].position;
-      const dx = p2.x - p1.x;
-      const dz = p2.z - p1.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      if (horizontalDist > 0.001) {
-        grade = (h2 - h1) / horizontalDist;
-      }
-    }
-
-    // Physics calculation
-    const gravityComponent = -grade * GRAVITY;
-    const dragForce = AIR_RESISTANCE * speed * speed * Math.sign(speed);
-    const frictionForce = ROLLING_FRICTION * GRAVITY;
-
-    const netAcceleration = gravityComponent - dragForce - frictionForce;
-    newSpeed = speed + netAcceleration * dt;
-    newSpeed = Math.max(0.5, newSpeed); // Minimum speed
-  }
-
-  // Estimate G-force (simplified)
-  const gForce = 1.0 + (newSpeed - speed) / (GRAVITY * dt);
-
-  return { newSpeed, gForce: Math.max(0, Math.min(5, gForce)), height };
+function convertTrackPoints(trackPoints: TrackPoint[]): TrackPointInput[] {
+  return trackPoints.map(p => ({
+    position: {
+      x: p.position.x,
+      y: p.position.y,
+      z: p.position.z,
+    },
+    tilt: p.tilt,
+    hasLoop: p.hasLoop,
+  }));
 }
 
+/**
+ * Main physics simulation hook
+ */
 export function usePhysicsSimulation(): PhysicsSimulationResult {
   const {
     trackPoints,
@@ -159,222 +137,241 @@ export function usePhysicsSimulation(): PhysicsSimulationResult {
     rideProgress,
     rideSpeed,
     isRiding,
+    setRideProgress,
+    setRideSpeed,
   } = useRollerCoaster();
 
-  const [isWasmLoaded, setIsWasmLoaded] = useState(false);
+  // State
   const [isSimulating, setIsSimulating] = useState(false);
   const [physicsData, setPhysicsData] = useState<PhysicsData>(DEFAULT_PHYSICS);
   const [validationErrors, setValidationErrors] = useState<PhysicsSimulationResult['validationErrors']>([]);
 
-  const wasmSimulation = useRef<PhysicsSimulation | null>(null);
-  const lastProgress = useRef(0);
-  const lastSpeed = useRef(1.0);
+  // Refs for physics engine
+  const physicsEngine = useRef<RollerCoasterPhysics | null>(null);
   const animationFrameId = useRef<number | null>(null);
   const lastTime = useRef(performance.now());
+  const isInitialized = useRef(false);
 
-  // Load WASM on mount
+  // Initialize physics engine
   useEffect(() => {
-    loadPhysicsEngine()
-      .then(() => {
-        setIsWasmLoaded(true);
-        wasmSimulation.current = new PhysicsSimulation();
-      })
-      .catch(() => {
-        // WASM not available, will use JS fallback
-        setIsWasmLoaded(false);
-      });
-
+    physicsEngine.current = new RollerCoasterPhysics();
+    isInitialized.current = true;
+    
     return () => {
-      wasmSimulation.current?.dispose();
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+      }
+      physicsEngine.current = null;
     };
   }, []);
 
-  // Update physics during ride
+  // Update track when points change
   useEffect(() => {
-    if (!isRiding) {
+    if (!physicsEngine.current || trackPoints.length < 2) return;
+    
+    const points = convertTrackPoints(trackPoints);
+    physicsEngine.current.setTrack(points, isLooped);
+    physicsEngine.current.setChainLift(hasChainLift);
+    
+  }, [trackPoints, isLooped, hasChainLift]);
+
+  // Main simulation loop
+  useEffect(() => {
+    if (!isRiding || !physicsEngine.current) {
       setIsSimulating(false);
+      if (animationFrameId.current) {
+        cancelAnimationFrame(animationFrameId.current);
+        animationFrameId.current = null;
+      }
       return;
     }
 
     setIsSimulating(true);
+    
+    // Reset physics engine for new ride
+    physicsEngine.current.reset();
+    physicsEngine.current.setSpeed(rideSpeed || 1);
+    lastTime.current = performance.now();
 
     const updatePhysics = () => {
+      if (!physicsEngine.current || !isRiding) return;
+      
       const now = performance.now();
       const dt = Math.min((now - lastTime.current) / 1000, 0.05); // Cap at 50ms
       lastTime.current = now;
-
-      let speed = lastSpeed.current;
-      let gForce = 1.0;
-      let height = 0;
-
-      if (wasmSimulation.current?.isAvailable) {
-        // Use WASM physics
-        wasmSimulation.current.setChainLift(hasChainLift);
-        wasmSimulation.current.setProgress(rideProgress);
-        
-        const state = wasmSimulation.current.getState();
-        if (state) {
-          speed = state.speed;
-          gForce = state.gForceTotal;
-          height = state.height;
-        }
-      } else {
-        // Use JS fallback
-        const result = simulatePhysicsJS(
-          trackPoints,
-          loopSegments,
-          rideProgress,
-          lastSpeed.current,
-          hasChainLift,
-          isLooped,
-          dt
-        );
-        speed = result.newSpeed;
-        gForce = result.gForce;
-        height = result.height;
+      
+      // Step physics simulation
+      const state = physicsEngine.current.step(dt);
+      
+      // Handle track completion
+      if (!isLooped && state.progress >= 0.99) {
+        // Ride complete
+        return;
       }
-
-      lastSpeed.current = speed;
-      lastProgress.current = rideProgress;
-
-      const acceleration = (speed - lastSpeed.current) / dt;
-
-      // Update physics data
-      setPhysicsData({
-        speed,
-        speedKmh: speed * 3.6,
-        speedMph: speed * 2.237,
-        gForceVertical: gForce,
-        gForceLateral: 0, // Would need lateral calculation
-        gForceTotal: gForce,
-        height,
-        isOnChainLift: hasChainLift && rideProgress < 0.2,
-        isInLoop: false, // Would need loop detection
-        acceleration,
-        kinematicEnergy: 0.5 * speed * speed,
-        potentialEnergy: height * GRAVITY,
-      });
-
+      
+      // Convert physics state to PhysicsData
+      const speeds = physicsEngine.current.getSpeeds();
+      
+      const newPhysicsData: PhysicsData = {
+        speed: state.speed,
+        speedKmh: speeds.kmh,
+        speedMph: speeds.mph,
+        gForceVertical: state.gForceVertical,
+        gForceLateral: state.gForceLateral,
+        gForceLongitudinal: state.gForceLongitudinal,
+        gForceTotal: state.gForceTotal,
+        height: state.position.y,
+        progress: state.progress,
+        arcLength: state.arcLength,
+        grade: state.trackSample.grade,
+        curvature: state.trackSample.curvature,
+        bankAngle: state.trackSample.bankAngle,
+        isOnChainLift: state.isOnChainLift,
+        isInLoop: state.isInLoop,
+        isAirtime: state.isAirtime,
+        isBraking: state.isBraking,
+        kineticEnergy: state.kineticEnergy,
+        potentialEnergy: state.potentialEnergy,
+        totalEnergy: state.totalEnergy,
+        acceleration: state.acceleration.length(),
+      };
+      
+      setPhysicsData(newPhysicsData);
+      
+      // Continue simulation
       if (isRiding) {
         animationFrameId.current = requestAnimationFrame(updatePhysics);
       }
     };
 
-    lastTime.current = performance.now();
     animationFrameId.current = requestAnimationFrame(updatePhysics);
 
     return () => {
       if (animationFrameId.current) {
         cancelAnimationFrame(animationFrameId.current);
+        animationFrameId.current = null;
       }
     };
-  }, [isRiding, trackPoints, loopSegments, hasChainLift, isLooped, rideProgress]);
+  }, [isRiding, rideSpeed, isLooped, setRideProgress, setRideSpeed]);
 
   // Validate track
   const validateTrack = useCallback(() => {
     if (trackPoints.length < 2) {
       setValidationErrors([{
-        type: 'insufficient_points',
+        type: 'error',
         message: 'Need at least 2 track points',
         severity: 'error',
       }]);
       return;
     }
 
-    // Try WASM validation first
-    if (isWasmLoaded) {
-      const points = trackPoints.map(p => ({
-        x: p.position.x,
-        y: p.position.y,
-        z: p.position.z,
-        tilt: p.tilt,
-        hasLoop: p.hasLoop,
-      }));
-
-      const nativeResults = validateTrackNative(points, isLooped);
-      
-      if (nativeResults) {
-        const errors = nativeResults
-          .filter(r => r.severity > 0)
-          .map(r => ({
-            type: r.severity === 2 ? 'error' : 'warning',
-            message: r.message,
-            severity: r.severity === 2 ? 'error' as const : 'warning' as const,
-            pointIndex: r.pointIndex >= 0 ? r.pointIndex : undefined,
-          }));
-        
-        setValidationErrors(errors);
-        return;
-      }
-    }
-
-    // JS fallback validation
-    const errors: PhysicsSimulationResult['validationErrors'] = [];
-
-    // Check for low points
-    for (let i = 0; i < trackPoints.length; i++) {
-      if (trackPoints[i].position.y < 0.5) {
-        errors.push({
-          type: 'low_point',
-          message: `Point ${i + 1} is too low`,
-          severity: 'warning',
-          pointIndex: i,
-        });
-      }
-    }
-
-    // Check for steep grades
-    for (let i = 0; i < trackPoints.length - 1; i++) {
-      const h1 = trackPoints[i].position.y;
-      const h2 = trackPoints[i + 1].position.y;
-      const p1 = trackPoints[i].position;
-      const p2 = trackPoints[i + 1].position;
-      
-      const dx = p2.x - p1.x;
-      const dz = p2.z - p1.z;
-      const horizontalDist = Math.sqrt(dx * dx + dz * dz);
-      
-      if (horizontalDist > 0.1) {
-        const grade = Math.abs((h2 - h1) / horizontalDist) * 100;
-        if (grade > 80) {
-          errors.push({
-            type: 'steep_grade',
-            message: `Segment ${i + 1}-${i + 2} is too steep (${grade.toFixed(0)}%)`,
-            severity: 'error',
-            pointIndex: i,
-          });
-        } else if (grade > 60) {
-          errors.push({
-            type: 'steep_grade',
-            message: `Segment ${i + 1}-${i + 2} is steep (${grade.toFixed(0)}%)`,
-            severity: 'warning',
-            pointIndex: i,
-          });
-        }
-      }
-    }
-
+    const points = convertTrackPoints(trackPoints);
+    const issues = validateTrackPhysics(points, isLooped);
+    
+    const errors = issues.map(issue => ({
+      type: issue.type,
+      message: issue.message,
+      severity: issue.type as 'warning' | 'error' | 'info',
+      pointIndex: issue.pointIndex,
+      value: issue.value,
+    }));
+    
     setValidationErrors(errors);
-  }, [trackPoints, isLooped, isWasmLoaded]);
+  }, [trackPoints, isLooped]);
 
+  // Start simulation
   const startSimulation = useCallback(() => {
+    if (!physicsEngine.current) return;
+    
     setIsSimulating(true);
-    lastSpeed.current = 1.0;
-    lastProgress.current = 0;
-    wasmSimulation.current?.reset();
+    physicsEngine.current.reset();
+    physicsEngine.current.setSpeed(1);
+    lastTime.current = performance.now();
   }, []);
 
+  // Stop simulation
   const stopSimulation = useCallback(() => {
     setIsSimulating(false);
+    if (animationFrameId.current) {
+      cancelAnimationFrame(animationFrameId.current);
+      animationFrameId.current = null;
+    }
   }, []);
 
   return {
-    isWasmLoaded,
     isSimulating,
     physicsData,
     validationErrors,
     startSimulation,
     stopSimulation,
     validateTrack,
+    constants: PHYSICS_CONSTANTS,
   };
+}
+
+/**
+ * Hook to get physics data without running simulation
+ * Useful for displaying track statistics
+ */
+export function useTrackPhysicsPreview(
+  trackPoints: TrackPoint[],
+  isLooped: boolean,
+  hasChainLift: boolean
+): {
+  maxSpeed: number;
+  maxGForce: number;
+  minGForce: number;
+  totalLength: number;
+  rideTime: number;
+  issues: ValidationIssue[];
+} {
+  return useMemo(() => {
+    if (trackPoints.length < 2) {
+      return {
+        maxSpeed: 0,
+        maxGForce: 1,
+        minGForce: 1,
+        totalLength: 0,
+        rideTime: 0,
+        issues: [],
+      };
+    }
+    
+    const points = convertTrackPoints(trackPoints);
+    const physics = new RollerCoasterPhysics();
+    physics.setTrack(points, isLooped);
+    physics.setChainLift(hasChainLift);
+    physics.reset();
+    physics.setSpeed(1);
+    
+    let maxSpeed = 0;
+    let maxGForce = 1;
+    let minGForce = 1;
+    let totalTime = 0;
+    const dt = 0.016;
+    const maxSteps = 10000;
+    
+    for (let i = 0; i < maxSteps; i++) {
+      const state = physics.step(dt);
+      totalTime += dt;
+      
+      maxSpeed = Math.max(maxSpeed, state.speed);
+      maxGForce = Math.max(maxGForce, state.gForceTotal);
+      minGForce = Math.min(minGForce, state.gForceVertical);
+      
+      if (!isLooped && state.progress >= 0.99) break;
+      if (isLooped && i > 100 && state.progress < 0.01) break;
+    }
+    
+    const issues = validateTrackPhysics(points, isLooped);
+    
+    return {
+      maxSpeed,
+      maxGForce,
+      minGForce,
+      totalLength: physics.getState().arcLength || 0,
+      rideTime: totalTime,
+      issues,
+    };
+  }, [trackPoints, isLooped, hasChainLift]);
 }
