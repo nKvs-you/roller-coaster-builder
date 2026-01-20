@@ -49,9 +49,6 @@ export const useAudio = create<AudioState>((set, get) => ({
     
     // Just update the muted state
     set({ isMuted: newMutedState });
-    
-    // Log the change
-    console.log(`Sound ${newMutedState ? 'muted' : 'unmuted'}`);
   },
   
   playHit: () => {
@@ -59,15 +56,14 @@ export const useAudio = create<AudioState>((set, get) => ({
     if (hitSound) {
       // If sound is muted, don't play anything
       if (isMuted) {
-        console.log("Hit sound skipped (muted)");
         return;
       }
       
       // Clone the sound to allow overlapping playback
       const soundClone = hitSound.cloneNode() as HTMLAudioElement;
       soundClone.volume = 0.3;
-      soundClone.play().catch(error => {
-        console.log("Hit sound play prevented:", error);
+      soundClone.play().catch(() => {
+        // Audio play prevented by browser policy - this is expected
       });
     }
   },
@@ -77,13 +73,12 @@ export const useAudio = create<AudioState>((set, get) => ({
     if (successSound) {
       // If sound is muted, don't play anything
       if (isMuted) {
-        console.log("Success sound skipped (muted)");
         return;
       }
       
       successSound.currentTime = 0;
-      successSound.play().catch(error => {
-        console.log("Success sound play prevented:", error);
+      successSound.play().catch(() => {
+        // Audio play prevented by browser policy - this is expected
       });
     }
   },

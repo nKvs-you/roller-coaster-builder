@@ -604,7 +604,7 @@ export const useRollerCoaster = create<RollerCoasterState>()(
     const state = get();
     if (state.historyIndex >= state.history.length - 1) return;
     
-    const entry = state.history[state.historyIndex + 2] || state.history[state.historyIndex + 1];
+    const entry = state.history[state.historyIndex + 1];
     if (!entry) return;
     
     const trackPoints = entry.trackPoints.map(deserializeTrackPoint);

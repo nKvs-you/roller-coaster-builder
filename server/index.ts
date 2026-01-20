@@ -6,8 +6,17 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+// Security: Limit JSON body size to prevent DoS attacks
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+
+// Security: Add basic security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  next();
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
@@ -53,8 +62,14 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
+    // Log error for debugging (but don't expose details in production)
+    if (process.env.NODE_ENV !== 'production') {
+      console.error('Server error:', err);
+    } else {
+      log(`Error: ${message}`, 'error');
+    }
+
     res.status(status).json({ message });
-    throw err;
   });
 
   // importantly only setup vite in development and after
