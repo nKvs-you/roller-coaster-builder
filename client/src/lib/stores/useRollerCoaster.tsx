@@ -625,4 +625,4 @@ export const useRollerCoaster = create<RollerCoasterState>()(
       selectedPointId: null,
     });
   },
-}));
+})));
