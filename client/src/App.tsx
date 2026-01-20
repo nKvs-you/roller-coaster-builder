@@ -29,12 +29,12 @@ function MusicController() {
   useEffect(() => {
     const base = import.meta.env.BASE_URL || '/';
     
-    const dayMusic = new Audio(`${base}sounds/music.mp3`);
+    const dayMusic = new Audio(`${base}sounds/menuloop.mp3`);
     dayMusic.loop = true;
     dayMusic.volume = 0.5;
     setDaylightMusic(dayMusic);
     
-    const nightMusicAudio = new Audio(`${base}sounds/lovelyday.mp3`);
+    const nightMusicAudio = new Audio(`${base}sounds/menuloop.mp3`);
     nightMusicAudio.loop = true;
     nightMusicAudio.volume = 0.5;
     setNightMusic(nightMusicAudio);

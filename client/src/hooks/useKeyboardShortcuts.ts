@@ -20,6 +20,8 @@ export function useKeyboardShortcuts() {
     startRide,
     stopRide,
     isRiding,
+    snapToGrid,
+    setSnapToGrid,
   } = useRollerCoaster();
 
   const handleKeyDown = useCallback(
@@ -101,6 +103,11 @@ export function useKeyboardShortcuts() {
           }
           break;
 
+        case "g":
+          e.preventDefault();
+          setSnapToGrid(!snapToGrid);
+          break;
+
         case " ": // Space
           e.preventDefault();
           if (trackPoints.length >= 2) {
@@ -139,6 +146,8 @@ export function useKeyboardShortcuts() {
       startRide,
       stopRide,
       isRiding,
+      snapToGrid,
+      setSnapToGrid,
     ]
   );
 
@@ -154,6 +163,7 @@ export const KEYBOARD_SHORTCUTS = [
   { key: "Tab / Arrow keys", action: "Select next/prev point" },
   { key: "Shift+Tab", action: "Select previous point" },
   { key: "A", action: "Toggle add points mode" },
+  { key: "G", action: "Toggle snap to grid" },
   { key: "Space", action: "Start/stop ride" },
   { key: "Escape", action: "Deselect / Exit ride" },
   { key: "Ctrl+Z", action: "Undo" },

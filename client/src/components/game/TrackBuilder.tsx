@@ -4,9 +4,10 @@ import * as THREE from "three";
 import { useRollerCoaster } from "@/lib/stores/useRollerCoaster";
 import { TrackPoint } from "./TrackPoint";
 import { Track } from "./Track";
+import { Grid } from "@react-three/drei";
 
 export function TrackBuilder() {
-  const { trackPoints, addTrackPoint, mode, selectPoint, isAddingPoints } = useRollerCoaster();
+  const { trackPoints, addTrackPoint, mode, selectPoint, isAddingPoints, snapToGrid, gridSize } = useRollerCoaster();
   const planeRef = useRef<THREE.Mesh>(null);
   const { gl } = useThree();
   
@@ -31,7 +32,6 @@ export function TrackBuilder() {
       if (isDraggingNew && dragPosition) {
         const finalPoint = new THREE.Vector3(dragPosition.x, currentHeightRef.current, dragPosition.z);
         addTrackPoint(finalPoint);
-        console.log("Added track point at:", finalPoint);
       }
       
       setIsDraggingNew(false);
@@ -49,6 +49,8 @@ export function TrackBuilder() {
   }, [isDraggingNew, dragPosition, addTrackPoint, gl.domElement]);
   
   const handlePointerDown = (e: ThreeEvent<PointerEvent>) => {
+    // Only build track on left-click (button 0), not right-click (button 2) or middle-click (button 1)
+    if (e.button !== 0) return;
     if (mode !== "build" || !isAddingPoints) return;
     e.stopPropagation();
     
@@ -63,6 +65,24 @@ export function TrackBuilder() {
   
   return (
     <group>
+      {/* Visual grid when snap-to-grid is enabled */}
+      {snapToGrid && mode === "build" && (
+        <Grid
+          args={[200, 200]}
+          cellSize={gridSize}
+          cellThickness={0.5}
+          cellColor="#4a5568"
+          sectionSize={gridSize * 5}
+          sectionThickness={1}
+          sectionColor="#718096"
+          fadeDistance={100}
+          fadeStrength={1}
+          followCamera={false}
+          infiniteGrid={true}
+          position={[0, 0.02, 0]}
+        />
+      )}
+      
       <mesh
         ref={planeRef}
         rotation={[-Math.PI / 2, 0, 0]}

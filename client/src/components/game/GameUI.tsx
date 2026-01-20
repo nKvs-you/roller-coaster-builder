@@ -145,6 +145,10 @@ export function GameUI() {
     redo,
     canUndo,
     canRedo,
+    snapToGrid,
+    setSnapToGrid,
+    gridSize,
+    setGridSize,
   } = useRollerCoaster();
   
   const [position, setPosition] = useState({ x: 8, y: 8 });
@@ -407,6 +411,32 @@ export function GameUI() {
                     {isNightMode ? "🌙 Night Mode" : "☀️ Day Mode"}
                   </Button>
                 </Tooltip>
+                
+                <div className="flex gap-2 items-center">
+                  <Tooltip text="Snap points to grid (G)">
+                    <Button
+                      size="sm"
+                      onClick={() => setSnapToGrid(!snapToGrid)}
+                      className={`h-8 text-[10px] px-3 flex-1 font-medium transition-all duration-200 ${snapToGrid 
+                        ? "bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 shadow-lg shadow-teal-500/25" 
+                        : "bg-slate-700/50 hover:bg-slate-600/50 border border-white/10"}`}
+                    >
+                      {snapToGrid ? "✓ Grid Snap" : "Grid Snap"}
+                    </Button>
+                  </Tooltip>
+                  {snapToGrid && (
+                    <select
+                      value={gridSize}
+                      onChange={(e) => setGridSize(parseFloat(e.target.value))}
+                      className="h-8 text-[10px] px-2 bg-slate-700/50 border border-white/10 rounded text-white"
+                    >
+                      <option value="0.5">0.5m</option>
+                      <option value="1">1m</option>
+                      <option value="2">2m</option>
+                      <option value="5">5m</option>
+                    </select>
+                  )}
+                </div>
               </div>
             </Section>
             

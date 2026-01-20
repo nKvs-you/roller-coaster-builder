@@ -132,6 +132,10 @@ interface RollerCoasterState {
   savedCoasters: SavedCoaster[];
   currentCoasterName: string | null;
   
+  // Editing helpers
+  snapToGrid: boolean;
+  gridSize: number;
+  
   // Undo/redo state
   history: HistoryEntry[];
   historyIndex: number;
@@ -160,6 +164,8 @@ interface RollerCoasterState {
   setHasChainLift: (hasChain: boolean) => void;
   setShowWoodSupports: (show: boolean) => void;
   setIsNightMode: (night: boolean) => void;
+  setSnapToGrid: (snap: boolean) => void;
+  setGridSize: (size: number) => void;
   startRide: () => void;
   stopRide: () => void;
   
@@ -213,6 +219,10 @@ export const useRollerCoaster = create<RollerCoasterState>()(
   savedCoasters: loadSavedCoasters(),
   currentCoasterName: null,
   
+  // Editing helpers
+  snapToGrid: false,
+  gridSize: 1,
+  
   // Undo/redo state
   history: [],
   historyIndex: -1,
@@ -234,12 +244,22 @@ export const useRollerCoaster = create<RollerCoasterState>()(
   
   setIsNightMode: (night) => set({ isNightMode: night }),
   
+  setSnapToGrid: (snap) => set({ snapToGrid: snap }),
+  
+  setGridSize: (size) => set({ gridSize: Math.max(0.5, Math.min(10, size)) }),
+  
   addTrackPoint: (position) => {
     const state = get();
     state.pushHistory();
     const id = `point-${++pointCounter}`;
+    // Apply snap to grid if enabled
+    let finalPos = position.clone();
+    if (state.snapToGrid) {
+      finalPos.x = Math.round(finalPos.x / state.gridSize) * state.gridSize;
+      finalPos.z = Math.round(finalPos.z / state.gridSize) * state.gridSize;
+    }
     set((state) => ({
-      trackPoints: [...state.trackPoints, { id, position: position.clone(), tilt: 0 }],
+      trackPoints: [...state.trackPoints, { id, position: finalPos, tilt: 0 }],
     }));
   },
   
