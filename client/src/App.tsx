@@ -93,20 +93,19 @@ function MusicController() {
 }
 
 function Scene() {
-  const { mode } = useRollerCoaster();
-  const [showDebug, setShowDebug] = useState(false);
+  const { mode, showDebugOverlay, setShowDebugOverlay } = useRollerCoaster();
   
-  // Toggle debug with keyboard
+  // Toggle debug with keyboard (F3)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'F3') {
         e.preventDefault();
-        setShowDebug(prev => !prev);
+        setShowDebugOverlay(!showDebugOverlay);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [showDebugOverlay, setShowDebugOverlay]);
   
   return (
     <>
@@ -124,8 +123,8 @@ function Scene() {
         {/* Editor gizmos for professional editing */}
         <EditorGizmos />
         
-        {/* Physics debug overlay (toggle with F3) */}
-        {showDebug && (
+        {/* Physics debug overlay (toggle with F3 or from Debug menu) */}
+        {showDebugOverlay && (
           <PhysicsDebugOverlay 
             showVelocity={true}
             showForces={true}

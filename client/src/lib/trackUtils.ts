@@ -106,7 +106,16 @@ export function interpolateTilt(
 // ============================================================================
 
 /**
- * Samples a vertical loop with corkscrew offset at parameter t (0-1)
+ * Samples a TRUE vertical loop-de-loop at parameter t (0-1)
+ * Creates a proper circular loop that goes upside down
+ * 
+ * The loop geometry:
+ * - Entry: track level, facing forward
+ * - Quarter: climbing up, facing up
+ * - Half: at top, upside down, facing backward
+ * - Three-quarters: coming down, facing down  
+ * - Exit: track level, facing forward
+ * 
  * θ(t) = 2π * (t - sin(2πt)/(2π)) ensures zero angular velocity at endpoints
  */
 export function sampleVerticalLoopAnalytically(
@@ -116,33 +125,48 @@ export function sampleVerticalLoopAnalytically(
   const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
 
   const twoPi = Math.PI * 2;
-  const corkscrewOffset = radius * 0.4;
+  
+  // Small lateral offset to prevent track self-intersection
+  const lateralOffset = radius * 0.15;
 
-  // Eased theta for smooth start/end
+  // Eased theta for smooth start/end (prevents jerky motion)
+  // This creates acceleration at start, constant speed in middle, deceleration at end
   const theta = twoPi * (t - Math.sin(twoPi * t) / twoPi);
   const dThetaDt = twoPi * (1 - Math.cos(twoPi * t));
 
-  // Vertical loop with lateral corkscrew offset
+  // TRUE VERTICAL LOOP-DE-LOOP:
+  // The loop is in the vertical plane defined by forward and up vectors
+  // - sin(theta) moves forward (starts at 0, goes to 1 at π/2, back to 0 at π, etc)
+  // - (1 - cos(theta)) moves up (starts at 0, goes to 2*radius at π, back to 0 at 2π)
+  
+  // Point on the loop circle
   const point = new THREE.Vector3()
     .copy(entryPos)
-    .addScaledVector(forward, pitch * t + radius * Math.sin(theta))
+    // Forward motion: radius * sin(theta) - creates the horizontal displacement
+    .addScaledVector(forward, radius * Math.sin(theta) + pitch * t * 0.3)
+    // Vertical motion: radius * (1 - cos(theta)) - creates the vertical loop
     .addScaledVector(U0, radius * (1 - Math.cos(theta)))
-    .addScaledVector(R0, corkscrewOffset * Math.sin(theta));
+    // Small lateral offset varies sinusoidally to prevent self-intersection
+    .addScaledVector(R0, lateralOffset * Math.sin(theta));
 
-  // Tangent includes corkscrew term
+  // Tangent (direction of travel) - derivative of position with respect to theta
   const tangent = new THREE.Vector3()
     .copy(forward)
-    .multiplyScalar(pitch + radius * Math.cos(theta) * dThetaDt)
+    .multiplyScalar(radius * Math.cos(theta) * dThetaDt + pitch * 0.3)
     .addScaledVector(U0, radius * Math.sin(theta) * dThetaDt)
-    .addScaledVector(R0, corkscrewOffset * Math.cos(theta) * dThetaDt)
+    .addScaledVector(R0, lateralOffset * Math.cos(theta) * dThetaDt)
     .normalize();
 
-  // Up vector rotates for vertical loop effect
+  // Up vector rotates with the loop to keep rider oriented correctly
+  // At entry (theta=0): up = U0 (normal up)
+  // At top (theta=π): up = -U0 (upside down)
+  // At exit (theta=2π): up = U0 (normal up again)
   const rotatedUp = new THREE.Vector3()
     .addScaledVector(U0, Math.cos(theta))
     .addScaledVector(forward, -Math.sin(theta))
     .normalize();
 
+  // Normal (perpendicular to track surface) - points toward center of loop
   const normal = R0.clone();
 
   return { point, tangent, up: rotatedUp, normal };
@@ -174,6 +198,142 @@ export function computeRollFrame(
   const right = new THREE.Vector3().crossVectors(forward, entryUp).normalize();
 
   return { entryPos, forward, up: entryUp, right, radius, pitch };
+}
+
+/**
+ * Samples a corkscrew (barrel roll) at parameter t (0-1)
+ * This rotates the track around the forward axis while maintaining forward motion
+ */
+export function sampleCorkscrewAnalytically(
+  frame: BarrelRollFrame,
+  t: number,
+  rotations: number = 1
+): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3; normal: THREE.Vector3 } {
+  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
+  
+  const totalRotation = Math.PI * 2 * rotations;
+  
+  // Eased theta for smooth entry/exit
+  const twoPi = Math.PI * 2;
+  const easedT = t - Math.sin(twoPi * t) / twoPi;
+  const theta = totalRotation * easedT;
+  
+  // Corkscrew: move forward while rotating around forward axis
+  const point = new THREE.Vector3()
+    .copy(entryPos)
+    // Forward motion proportional to t
+    .addScaledVector(forward, pitch * t)
+    // Circular motion around forward axis (much smaller radius than loop)
+    .addScaledVector(U0, radius * 0.3 * (1 - Math.cos(theta)))
+    .addScaledVector(R0, radius * 0.3 * Math.sin(theta));
+  
+  // Tangent - mostly forward with slight rotation
+  const tangent = new THREE.Vector3()
+    .copy(forward)
+    .normalize();
+  
+  // Up vector rotates around forward axis
+  const rotatedUp = new THREE.Vector3()
+    .addScaledVector(U0, Math.cos(theta))
+    .addScaledVector(R0, Math.sin(theta))
+    .normalize();
+  
+  const normal = new THREE.Vector3().crossVectors(forward, rotatedUp).normalize();
+  
+  return { point, tangent, up: rotatedUp, normal };
+}
+
+/**
+ * Samples a helix turn at parameter t (0-1)
+ * A helix maintains a banked turn while climbing or descending
+ */
+export function sampleHelixAnalytically(
+  frame: BarrelRollFrame,
+  t: number,
+  direction: 'left' | 'right' = 'right',
+  turns: number = 1
+): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3; normal: THREE.Vector3 } {
+  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
+  
+  const totalAngle = Math.PI * 2 * turns;
+  const dir = direction === 'right' ? 1 : -1;
+  
+  // Eased angle for smooth motion
+  const twoPi = Math.PI * 2;
+  const easedT = t - Math.sin(twoPi * t) / twoPi;
+  const angle = totalAngle * easedT;
+  
+  // Helix: circular horizontal motion with gradual height change
+  const point = new THREE.Vector3()
+    .copy(entryPos)
+    // Horizontal circular motion
+    .addScaledVector(forward, radius * Math.sin(angle))
+    .addScaledVector(R0, dir * radius * (1 - Math.cos(angle)))
+    // Gradual height change over the helix
+    .addScaledVector(U0, pitch * t);
+  
+  // Tangent follows the helix curve
+  const tangent = new THREE.Vector3()
+    .addScaledVector(forward, Math.cos(angle))
+    .addScaledVector(R0, dir * Math.sin(angle))
+    .addScaledVector(U0, pitch / (totalAngle * radius) * 0.5)
+    .normalize();
+  
+  // Up vector tilts into the turn (banking)
+  const bankAngle = Math.PI * 0.25; // 45 degree bank
+  const rotatedUp = new THREE.Vector3()
+    .addScaledVector(U0, Math.cos(bankAngle))
+    .addScaledVector(R0, dir * Math.sin(bankAngle) * Math.sin(angle))
+    .normalize();
+  
+  const normal = new THREE.Vector3().crossVectors(tangent, rotatedUp).normalize();
+  
+  return { point, tangent, up: rotatedUp, normal };
+}
+
+/**
+ * Samples a Zero-G roll at parameter t (0-1)
+ * Zero-G roll: rider experiences weightlessness at the apex
+ * The track twists 360 degrees while maintaining a parabolic trajectory
+ */
+export function sampleZeroGRollAnalytically(
+  frame: BarrelRollFrame,
+  t: number
+): { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3; normal: THREE.Vector3 } {
+  const { entryPos, forward, up: U0, right: R0, radius, pitch } = frame;
+  
+  const twoPi = Math.PI * 2;
+  
+  // Eased rotation for smooth entry/exit
+  const easedT = t - Math.sin(twoPi * t) / twoPi;
+  const rollAngle = twoPi * easedT;
+  
+  // Parabolic height profile (creates zero-G at apex)
+  const heightProfile = 4 * t * (1 - t); // Peaks at t=0.5
+  
+  // Point on the zero-G roll
+  const point = new THREE.Vector3()
+    .copy(entryPos)
+    // Forward motion
+    .addScaledVector(forward, pitch * t)
+    // Parabolic height change
+    .addScaledVector(U0, radius * 0.5 * heightProfile);
+  
+  // Tangent follows the parabolic path
+  const tangent = new THREE.Vector3()
+    .copy(forward)
+    .addScaledVector(U0, radius * 0.5 * 4 * (0.5 - t))
+    .normalize();
+  
+  // Up vector rotates 360 degrees during the maneuver
+  const rotatedUp = new THREE.Vector3()
+    .addScaledVector(U0, Math.cos(rollAngle))
+    .addScaledVector(R0, Math.sin(rollAngle))
+    .normalize();
+  
+  const normal = new THREE.Vector3().crossVectors(tangent, rotatedUp).normalize();
+  
+  return { point, tangent, up: rotatedUp, normal };
 }
 
 export function computeRollArcLength(radius: number, pitch: number): number {
@@ -371,7 +531,32 @@ export function sampleHybridTrack(
     (progress - section.startProgress) / (section.endProgress - section.startProgress);
 
   if (section.type === "roll" && section.rollFrame) {
-    const sample = sampleVerticalLoopAnalytically(section.rollFrame, localT);
+    // Find the loop segment to determine element type
+    const loopSeg = loopSegments.find(seg => {
+      const pointIdx = trackPoints.findIndex(p => p.id === seg.entryPointId);
+      return pointIdx === section.pointIndex;
+    });
+    
+    const elementType = loopSeg?.elementType || 'loop';
+    
+    let sample: { point: THREE.Vector3; tangent: THREE.Vector3; up: THREE.Vector3; normal: THREE.Vector3 };
+    
+    switch (elementType) {
+      case 'corkscrew':
+        sample = sampleCorkscrewAnalytically(section.rollFrame, localT, (loopSeg?.rotation || 360) / 360);
+        break;
+      case 'helix':
+        sample = sampleHelixAnalytically(section.rollFrame, localT, loopSeg?.direction || 'right', 1);
+        break;
+      case 'zero-g-roll':
+        sample = sampleZeroGRollAnalytically(section.rollFrame, localT);
+        break;
+      case 'loop':
+      default:
+        sample = sampleVerticalLoopAnalytically(section.rollFrame, localT);
+        break;
+    }
+    
     return { ...sample, inRoll: true, tilt: 0 };
   } else if (section.splineStartT !== undefined && section.splineEndT !== undefined) {
     const splineT =

@@ -4,6 +4,15 @@ import * as THREE from "three";
 
 export type CoasterMode = "build" | "ride" | "preview";
 
+// Track element types for special track sections
+export type TrackElementType = 
+  | 'loop'          // Vertical loop-de-loop
+  | 'corkscrew'     // Barrel roll / corkscrew
+  | 'helix'         // Helix turn
+  | 'immelman'      // Immelman turn (half loop + half twist)
+  | 'zero-g-roll'   // Zero-G roll
+  | 'cobra-roll';   // Cobra roll (bowtie inversion)
+
 // History entry for undo/redo
 interface HistoryEntry {
   trackPoints: SerializedTrackPoint[];
@@ -11,29 +20,35 @@ interface HistoryEntry {
   isLooped: boolean;
 }
 
-// Loop segment descriptor - stored separately from track points
+// Loop/element segment descriptor - stored separately from track points
 // The actual loop frame (forward, up, right) is computed at runtime from the spline
-// Uses corkscrew helix geometry: advances forward by 'pitch' while rotating 360 degrees
 export interface LoopSegment {
   id: string;
-  entryPointId: string;  // ID of track point where loop starts
-  radius: number;
-  pitch: number;  // Forward distance traveled during one full rotation (prevents intersection)
+  entryPointId: string;  // ID of track point where element starts
+  elementType: TrackElementType;  // Type of track element
+  radius: number;        // Radius of the element
+  pitch: number;         // Forward distance traveled during rotation
+  rotation: number;      // Total rotation in degrees (360 for full loop, 720 for double corkscrew)
+  direction: 'left' | 'right';  // Direction for asymmetric elements
 }
 
 export interface TrackPoint {
   id: string;
   position: THREE.Vector3;
   tilt: number;
-  hasLoop?: boolean;  // True if a loop starts at this point
+  hasLoop?: boolean;  // True if a track element starts at this point
+  elementType?: TrackElementType;  // Type of element at this point
 }
 
 // Serializable versions for JSON storage
 interface SerializedLoopSegment {
   id: string;
   entryPointId: string;
+  elementType?: TrackElementType;
   radius: number;
   pitch: number;
+  rotation?: number;
+  direction?: 'left' | 'right';
 }
 
 interface SerializedTrackPoint {
@@ -41,6 +56,7 @@ interface SerializedTrackPoint {
   position: [number, number, number];
   tilt: number;
   hasLoop?: boolean;
+  elementType?: TrackElementType;
 }
 
 export interface SavedCoaster {
@@ -69,6 +85,7 @@ function serializeTrackPoint(point: TrackPoint): SerializedTrackPoint {
     position: serializeVector3(point.position),
     tilt: point.tilt,
     hasLoop: point.hasLoop,
+    elementType: point.elementType,
   };
 }
 
@@ -78,6 +95,7 @@ function deserializeTrackPoint(serialized: SerializedTrackPoint): TrackPoint {
     position: deserializeVector3(serialized.position),
     tilt: serialized.tilt,
     hasLoop: serialized.hasLoop,
+    elementType: serialized.elementType,
   };
 }
 
@@ -85,8 +103,11 @@ function serializeLoopSegment(segment: LoopSegment): SerializedLoopSegment {
   return {
     id: segment.id,
     entryPointId: segment.entryPointId,
+    elementType: segment.elementType,
     radius: segment.radius,
     pitch: segment.pitch,
+    rotation: segment.rotation,
+    direction: segment.direction,
   };
 }
 
@@ -94,8 +115,11 @@ function deserializeLoopSegment(serialized: SerializedLoopSegment): LoopSegment 
   return {
     id: serialized.id,
     entryPointId: serialized.entryPointId,
+    elementType: serialized.elementType || 'loop',
     radius: serialized.radius,
-    pitch: serialized.pitch ?? 12,  // Default pitch for backwards compatibility
+    pitch: serialized.pitch ?? 12,
+    rotation: serialized.rotation ?? 360,
+    direction: serialized.direction ?? 'right',
   };
 }
 
@@ -128,6 +152,7 @@ interface RollerCoasterState {
   hasChainLift: boolean;
   showWoodSupports: boolean;
   isNightMode: boolean;
+  showDebugOverlay: boolean;
   cameraTarget: THREE.Vector3 | null;
   savedCoasters: SavedCoaster[];
   currentCoasterName: string | null;
@@ -149,8 +174,11 @@ interface RollerCoasterState {
   updateTrackPoint: (id: string, position: THREE.Vector3) => void;
   updateTrackPointTilt: (id: string, tilt: number) => void;
   removeTrackPoint: (id: string) => void;
-  createLoopAtPoint: (id: string) => void;
+  createLoopAtPoint: (id: string, elementType?: TrackElementType) => void;
   removeLoopAtPoint: (id: string) => void;
+  createCorkscrewAtPoint: (id: string) => void;
+  createHelixAtPoint: (id: string, direction?: 'left' | 'right') => void;
+  createZeroGRollAtPoint: (id: string) => void;
   selectPoint: (id: string | null) => void;
   selectNextPoint: () => void;
   selectPrevPoint: () => void;
@@ -164,6 +192,7 @@ interface RollerCoasterState {
   setHasChainLift: (hasChain: boolean) => void;
   setShowWoodSupports: (show: boolean) => void;
   setIsNightMode: (night: boolean) => void;
+  setShowDebugOverlay: (show: boolean) => void;
   setSnapToGrid: (snap: boolean) => void;
   setGridSize: (size: number) => void;
   startRide: () => void;
@@ -215,6 +244,7 @@ export const useRollerCoaster = create<RollerCoasterState>()(
   hasChainLift: true,
   showWoodSupports: false,
   isNightMode: false,
+  showDebugOverlay: false,
   cameraTarget: null,
   savedCoasters: loadSavedCoasters(),
   currentCoasterName: null,
@@ -243,6 +273,8 @@ export const useRollerCoaster = create<RollerCoasterState>()(
   setShowWoodSupports: (show) => set({ showWoodSupports: show }),
   
   setIsNightMode: (night) => set({ isNightMode: night }),
+  
+  setShowDebugOverlay: (show) => set({ showDebugOverlay: show }),
   
   setSnapToGrid: (snap) => set({ snapToGrid: snap }),
   
@@ -292,7 +324,7 @@ export const useRollerCoaster = create<RollerCoasterState>()(
     }));
   },
   
-  createLoopAtPoint: (id) => {
+  createLoopAtPoint: (id, elementType = 'loop') => {
     const currentState = get();
     currentState.pushHistory();
     set((state) => {
@@ -302,18 +334,118 @@ export const useRollerCoaster = create<RollerCoasterState>()(
       const entryPoint = state.trackPoints[pointIndex];
       if (entryPoint.hasLoop) return state;
       
-      const loopRadius = 5;
-      const loopPitch = 12;  // Forward distance during one rotation (prevents intersection)
+      // Default parameters for vertical loop
+      const loopRadius = 6;
+      const loopPitch = 3;  // Minimal forward movement for true vertical loop
       
       const loopSegment: LoopSegment = {
         id: `loop-${Date.now()}`,
         entryPointId: id,
+        elementType: elementType,
         radius: loopRadius,
         pitch: loopPitch,
+        rotation: 360,
+        direction: 'right',
       };
       
       const newTrackPoints = state.trackPoints.map((p) =>
-        p.id === id ? { ...p, hasLoop: true } : p
+        p.id === id ? { ...p, hasLoop: true, elementType } : p
+      );
+      
+      return {
+        trackPoints: newTrackPoints,
+        loopSegments: [...state.loopSegments, loopSegment],
+      };
+    });
+  },
+  
+  createCorkscrewAtPoint: (id) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
+      if (pointIndex === -1) return state;
+      
+      const entryPoint = state.trackPoints[pointIndex];
+      if (entryPoint.hasLoop) return state;
+      
+      // Corkscrew: barrel roll with forward motion
+      const loopSegment: LoopSegment = {
+        id: `corkscrew-${Date.now()}`,
+        entryPointId: id,
+        elementType: 'corkscrew',
+        radius: 4,
+        pitch: 15,  // More forward motion for corkscrew
+        rotation: 360,
+        direction: 'right',
+      };
+      
+      const newTrackPoints = state.trackPoints.map((p) =>
+        p.id === id ? { ...p, hasLoop: true, elementType: 'corkscrew' } : p
+      );
+      
+      return {
+        trackPoints: newTrackPoints,
+        loopSegments: [...state.loopSegments, loopSegment],
+      };
+    });
+  },
+  
+  createHelixAtPoint: (id, direction = 'right') => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
+      if (pointIndex === -1) return state;
+      
+      const entryPoint = state.trackPoints[pointIndex];
+      if (entryPoint.hasLoop) return state;
+      
+      // Helix: horizontal spiral
+      const loopSegment: LoopSegment = {
+        id: `helix-${Date.now()}`,
+        entryPointId: id,
+        elementType: 'helix',
+        radius: 8,
+        pitch: 5,  // Vertical drop during helix
+        rotation: 540,  // 1.5 turns
+        direction,
+      };
+      
+      const newTrackPoints = state.trackPoints.map((p) =>
+        p.id === id ? { ...p, hasLoop: true, elementType: 'helix' } : p
+      );
+      
+      return {
+        trackPoints: newTrackPoints,
+        loopSegments: [...state.loopSegments, loopSegment],
+      };
+    });
+  },
+  
+  createZeroGRollAtPoint: (id) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
+      if (pointIndex === -1) return state;
+      
+      const entryPoint = state.trackPoints[pointIndex];
+      if (entryPoint.hasLoop) return state;
+      
+      // Zero-G roll: heartline roll with weightlessness
+      const loopSegment: LoopSegment = {
+        id: `zerog-${Date.now()}`,
+        entryPointId: id,
+        elementType: 'zero-g-roll',
+        radius: 5,
+        pitch: 18,
+        rotation: 360,
+        direction: 'right',
+      };
+      
+      const newTrackPoints = state.trackPoints.map((p) =>
+        p.id === id ? { ...p, hasLoop: true, elementType: 'zero-g-roll' } : p
       );
       
       return {
@@ -332,7 +464,7 @@ export const useRollerCoaster = create<RollerCoasterState>()(
       
       return {
         trackPoints: state.trackPoints.map((p) =>
-          p.id === id ? { ...p, hasLoop: false } : p
+          p.id === id ? { ...p, hasLoop: false, elementType: undefined } : p
         ),
         loopSegments: state.loopSegments.filter((seg) => seg.entryPointId !== id),
       };

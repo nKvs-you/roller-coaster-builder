@@ -135,8 +135,13 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
     setShowWoodSupports,
     isNightMode,
     setIsNightMode,
+    showDebugOverlay,
+    setShowDebugOverlay,
     createLoopAtPoint,
     removeLoopAtPoint,
+    createCorkscrewAtPoint,
+    createHelixAtPoint,
+    createZeroGRollAtPoint,
     duplicateTrackPoint,
     setCameraTarget,
     savedCoasters,
@@ -506,6 +511,51 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
                       </Button>
                     </Tooltip>
                   </div>
+                  
+                  {/* Track Elements */}
+                  {!selectedPoint.hasLoop && (
+                    <>
+                      <div className="text-[9px] text-slate-400 uppercase tracking-wider mt-2 mb-1">Add Element</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Tooltip text="Add corkscrew twist">
+                          <Button
+                            size="sm"
+                            onClick={() => createCorkscrewAtPoint(selectedPointId!)}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-500 hover:to-purple-400 shadow-lg shadow-violet-500/25 transition-all duration-200"
+                          >
+                            🌀 Corkscrew
+                          </Button>
+                        </Tooltip>
+                        <Tooltip text="Add helix turn">
+                          <Button
+                            size="sm"
+                            onClick={() => createHelixAtPoint(selectedPointId!, 'right')}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-cyan-600 to-teal-500 hover:from-cyan-500 hover:to-teal-400 shadow-lg shadow-cyan-500/25 transition-all duration-200"
+                          >
+                            🔃 Helix
+                          </Button>
+                        </Tooltip>
+                        <Tooltip text="Add zero-G roll">
+                          <Button
+                            size="sm"
+                            onClick={() => createZeroGRollAtPoint(selectedPointId!)}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 shadow-lg shadow-amber-500/25 transition-all duration-200"
+                          >
+                            🎯 Zero-G
+                          </Button>
+                        </Tooltip>
+                        <Tooltip text="Add vertical loop">
+                          <Button
+                            size="sm"
+                            onClick={() => createLoopAtPoint(selectedPointId!, 'loop')}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-pink-600 to-rose-500 hover:from-pink-500 hover:to-rose-400 shadow-lg shadow-pink-500/25 transition-all duration-200"
+                          >
+                            🔄 Loop
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    </>
+                  )}
                 </div>
               </Section>
             )}
@@ -603,6 +653,57 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
                   onChange={(e) => setRideSpeed(parseFloat(e.target.value))}
                   className="w-full h-2"
                 />
+              </div>
+            </Section>
+            
+            {/* Debug Section */}
+            <Section title="Debug" defaultExpanded={false} icon="🐛">
+              <div className="flex flex-col gap-2">
+                <Tooltip text="Show physics debug overlay (F3)">
+                  <Button
+                    size="sm"
+                    onClick={() => setShowDebugOverlay(!showDebugOverlay)}
+                    className={`h-8 text-[10px] px-3 w-full font-medium transition-all duration-200 ${showDebugOverlay 
+                      ? "bg-gradient-to-r from-yellow-600 to-amber-500 hover:from-yellow-500 hover:to-amber-400 shadow-lg shadow-yellow-500/25" 
+                      : "bg-slate-700/50 hover:bg-slate-600/50 border border-white/10"}`}
+                  >
+                    {showDebugOverlay ? "✓ Debug Overlay" : "Debug Overlay"}
+                  </Button>
+                </Tooltip>
+                
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider mt-1">Track Info</div>
+                <div className="bg-slate-800/50 rounded-lg p-2 font-mono text-[9px] text-slate-300 space-y-1">
+                  <div className="flex justify-between">
+                    <span>Points:</span>
+                    <span className="text-cyan-400">{trackPoints.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Elements:</span>
+                    <span className="text-pink-400">{loopSegments.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Looped:</span>
+                    <span className={isLooped ? 'text-emerald-400' : 'text-slate-500'}>{isLooped ? 'Yes' : 'No'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Chain Lift:</span>
+                    <span className={hasChainLift ? 'text-amber-400' : 'text-slate-500'}>{hasChainLift ? 'Yes' : 'No'}</span>
+                  </div>
+                </div>
+                
+                {loopSegments.length > 0 && (
+                  <>
+                    <div className="text-[9px] text-slate-400 uppercase tracking-wider mt-1">Elements</div>
+                    <div className="bg-slate-800/50 rounded-lg p-2 font-mono text-[9px] text-slate-300 space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
+                      {loopSegments.map((seg, i) => (
+                        <div key={i} className="flex justify-between items-center">
+                          <span className="capitalize">{seg.elementType || 'loop'}</span>
+                          <span className="text-violet-400">r={seg.radius.toFixed(1)}m</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
             </Section>
           </>
