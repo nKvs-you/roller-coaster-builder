@@ -13,10 +13,11 @@ import { EditorGizmos } from "./components/game/EditorGizmos";
 import { SoundEffects } from "./components/game/SoundEffects";
 import { PhysicsDebugOverlay } from "./components/game/PhysicsDebugOverlay";
 import { Canvas2DRideView } from "./components/game/Canvas2DRideView";
+import { Canvas2DEditor } from "./components/game/Canvas2DEditor";
 import { useRollerCoaster } from "./lib/stores/useRollerCoaster";
 import { useAudio } from "./lib/stores/useAudio";
 import { ErrorBoundary, Canvas3DErrorFallback } from "./components/ErrorBoundary";
-import { isWebGLAvailable, detectWebGL } from "./lib/webglDetect";
+import { detectWebGL } from "./lib/webglDetect";
 // Physics engine is now pure JavaScript - no WASM required
 
 function MusicController() {
@@ -141,13 +142,13 @@ function App() {
   // Check WebGL support
   const [webglSupported, setWebglSupported] = useState(true);
   const [use2DMode, setUse2DMode] = useState(false);
-  const { isRiding } = useRollerCoaster();
+  const { isRiding, mode } = useRollerCoaster();
   
   useEffect(() => {
     const support = detectWebGL();
     setWebglSupported(support.supported);
     if (!support.supported) {
-      console.log('WebGL not available, using 2D ride mode');
+      console.log('WebGL not available, using 2D mode for everything');
       setUse2DMode(true);
     }
   }, []);
@@ -167,6 +168,8 @@ function App() {
   
   // Show 2D ride view when riding in 2D mode or when WebGL is unavailable
   const show2DRide = isRiding && (use2DMode || !webglSupported);
+  // Use 2D editor when WebGL is unavailable or 2D mode is selected
+  const use2DEditor = use2DMode || !webglSupported;
   
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
@@ -175,11 +178,16 @@ function App() {
       
       {/* 2D Ride View (works without WebGL) */}
       {show2DRide && (
-        <Canvas2DRideView onExit={() => setUse2DMode(false)} />
+        <Canvas2DRideView onExit={() => {}} />
       )}
       
-      {/* 3D View (requires WebGL) */}
-      {webglSupported && !show2DRide && (
+      {/* 2D Editor (works without WebGL) */}
+      {use2DEditor && !isRiding && (
+        <Canvas2DEditor />
+      )}
+      
+      {/* 3D View (requires WebGL) - only when WebGL is available and 2D mode is off */}
+      {webglSupported && !use2DMode && !isRiding && (
         <ErrorBoundary fallback={<Canvas3DErrorFallback />}>
           <Canvas
             shadows
@@ -199,36 +207,35 @@ function App() {
         </ErrorBoundary>
       )}
       
-      {/* No WebGL Fallback UI */}
-      {!webglSupported && !isRiding && (
-        <div className="absolute inset-0 bg-slate-900 flex items-center justify-center">
-          <div className="text-center p-8 max-w-md">
-            <div className="text-6xl mb-4">🎢</div>
-            <h1 className="text-2xl font-bold text-white mb-4">
-              Roller Coaster Builder
-            </h1>
-            <div className="bg-amber-500/20 border border-amber-500/50 rounded-lg p-4 mb-4">
-              <p className="text-amber-400 text-sm">
-                ⚠️ WebGL is not available in your browser.
-                The 3D editor requires WebGL, but you can still experience rides in 2D mode!
-              </p>
-            </div>
-            <p className="text-slate-400 text-sm">
-              The physics simulation works without WebGL.
-              Try using a different browser or enabling hardware acceleration.
-            </p>
-          </div>
-        </div>
+      {/* 3D Ride (when not using 2D) */}
+      {webglSupported && !use2DMode && isRiding && (
+        <ErrorBoundary fallback={<Canvas3DErrorFallback />}>
+          <Canvas
+            shadows
+            camera={{
+              position: [20, 15, 20],
+              fov: 60,
+              near: 0.1,
+              far: 1000
+            }}
+            gl={{
+              antialias: true,
+              powerPreference: "default"
+            }}
+          >
+            <Scene />
+          </Canvas>
+        </ErrorBoundary>
       )}
       
-      {/* UI Overlays */}
-      {webglSupported && <GameUI use2DMode={use2DMode} onToggle2DMode={() => setUse2DMode(prev => !prev)} />}
-      {webglSupported && !use2DMode && <GForceDisplay />}
+      {/* UI Overlays - always show */}
+      <GameUI use2DMode={use2DMode} onToggle2DMode={() => setUse2DMode(prev => !prev)} />
+      {!use2DMode && webglSupported && <GForceDisplay />}
       
       {/* 2D Mode indicator */}
-      {use2DMode && webglSupported && !isRiding && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-purple-500/80 text-white px-4 py-2 rounded-lg text-sm font-bold">
-          2D Mode Active (Press F2 to toggle)
+      {use2DMode && !isRiding && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 bg-purple-500/80 text-white px-4 py-2 rounded-lg text-sm font-bold z-50">
+          2D Mode {webglSupported ? '(Press F2 to toggle 3D)' : '(WebGL unavailable)'}
         </div>
       )}
     </div>
