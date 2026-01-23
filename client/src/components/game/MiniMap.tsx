@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useEffect, useCallback } from 'react';
 import { useRollerCoaster } from '../../lib/stores/useRollerCoaster';
 import * as THREE from 'three';
 import { CatmullRomCurve3 } from 'three';
@@ -8,31 +8,76 @@ interface MiniMapProps {
   className?: string;
 }
 
+// Seeded random for consistent decoration placement
+function seededRandom(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { trackPoints, selectedPointId, rideProgress, mode, isNightMode } = useRollerCoaster();
+  const { trackPoints, selectedPointId, rideProgress, mode, isNightMode, loopSegments } = useRollerCoaster();
+  
+  // Pre-generate decorations for the minimap (stable positions)
+  const decorations = useMemo(() => {
+    const trees: { x: number; z: number; size: number }[] = [];
+    const rocks: { x: number; z: number; size: number }[] = [];
+    const flowers: { x: number; z: number; color: string }[] = [];
+    
+    // Trees - outer ring
+    for (let i = 0; i < 40; i++) {
+      const seed = i * 1337;
+      const angle = seededRandom(seed) * Math.PI * 2;
+      const radius = 50 + seededRandom(seed + 1) * 150;
+      trees.push({
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        size: 2 + seededRandom(seed + 2) * 2
+      });
+    }
+    
+    // Rocks scattered around
+    for (let i = 0; i < 20; i++) {
+      const seed = (i + 500) * 1337;
+      const angle = seededRandom(seed) * Math.PI * 2;
+      const radius = 30 + seededRandom(seed + 1) * 100;
+      rocks.push({
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        size: 1 + seededRandom(seed + 2) * 1.5
+      });
+    }
+    
+    // Flower beds
+    const colors = ['#E91E63', '#FF9800', '#FFEB3B', '#9C27B0', '#00BCD4'];
+    for (let i = 0; i < 15; i++) {
+      const seed = (i + 1000) * 1337;
+      const angle = seededRandom(seed) * Math.PI * 2;
+      const radius = 25 + seededRandom(seed + 1) * 50;
+      flowers.push({
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        color: colors[Math.floor(seededRandom(seed + 2) * colors.length)]
+      });
+    }
+    
+    return { trees, rocks, flowers };
+  }, []);
   
   // Calculate bounds and track data
   const trackData = useMemo(() => {
     if (trackPoints.length < 2) return null;
     
-    // Find bounds
-    let minX = Infinity, maxX = -Infinity;
-    let minZ = Infinity, maxZ = -Infinity;
+    // Find bounds including decorations
+    let minX = -100, maxX = 100;
+    let minZ = -100, maxZ = 100;
     
     trackPoints.forEach(point => {
-      minX = Math.min(minX, point.position.x);
-      maxX = Math.max(maxX, point.position.x);
-      minZ = Math.min(minZ, point.position.z);
-      maxZ = Math.max(maxZ, point.position.z);
+      minX = Math.min(minX, point.position.x - 20);
+      maxX = Math.max(maxX, point.position.x + 20);
+      minZ = Math.min(minZ, point.position.z - 20);
+      maxZ = Math.max(maxZ, point.position.z + 20);
     });
-    
-    // Add padding
-    const padding = 5;
-    minX -= padding;
-    maxX += padding;
-    minZ -= padding;
-    maxZ += padding;
     
     const rangeX = maxX - minX || 1;
     const rangeZ = maxZ - minZ || 1;
@@ -90,11 +135,99 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
     ctx.roundRect(0, 0, size, size, 12);
     ctx.stroke();
     
-    // Title
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    // Title with icon
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.font = 'bold 9px Inter, sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('🗺️ MAP', 8, 14);
+    
+    // Stats badge
+    if (trackPoints.length > 0) {
+      ctx.fillStyle = 'rgba(99, 102, 241, 0.3)';
+      ctx.beginPath();
+      ctx.roundRect(size - 35, 4, 30, 14, 4);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.font = 'bold 8px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${trackPoints.length}pts`, size - 20, 13);
+    }
+    
+    const margin = 20;
+    const drawSize = size - margin * 2;
+    const defaultScale = 200;
+    
+    // Transform world coords to canvas coords
+    const toCanvas = (x: number, z: number) => {
+      if (trackData) {
+        const nx = (x - trackData.centerX) / trackData.scale + 0.5;
+        const nz = (z - trackData.centerZ) / trackData.scale + 0.5;
+        return {
+          x: margin + nx * drawSize,
+          y: margin + nz * drawSize
+        };
+      } else {
+        return {
+          x: margin + (x / defaultScale + 0.5) * drawSize,
+          y: margin + (z / defaultScale + 0.5) * drawSize
+        };
+      }
+    };
+    
+    // Draw terrain decorations (trees, rocks, flowers)
+    // Trees (small green triangles)
+    decorations.trees.forEach(tree => {
+      const pos = toCanvas(tree.x, tree.z);
+      if (pos.x >= 0 && pos.x <= size && pos.y >= 0 && pos.y <= size) {
+        const treeSize = Math.max(1.5, tree.size * 0.8 / (trackData?.scale || defaultScale) * drawSize);
+        ctx.fillStyle = isNightMode ? 'rgba(34, 80, 34, 0.6)' : 'rgba(46, 125, 50, 0.5)';
+        ctx.beginPath();
+        ctx.moveTo(pos.x, pos.y - treeSize);
+        ctx.lineTo(pos.x - treeSize * 0.6, pos.y + treeSize * 0.5);
+        ctx.lineTo(pos.x + treeSize * 0.6, pos.y + treeSize * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    });
+    
+    // Rocks (small gray circles)
+    decorations.rocks.forEach(rock => {
+      const pos = toCanvas(rock.x, rock.z);
+      if (pos.x >= 0 && pos.x <= size && pos.y >= 0 && pos.y <= size) {
+        const rockSize = Math.max(1, rock.size * 0.5 / (trackData?.scale || defaultScale) * drawSize);
+        ctx.fillStyle = isNightMode ? 'rgba(75, 85, 99, 0.5)' : 'rgba(107, 114, 128, 0.4)';
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, rockSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    });
+    
+    // Flowers (colorful dots) - only in day mode
+    if (!isNightMode) {
+      decorations.flowers.forEach(flower => {
+        const pos = toCanvas(flower.x, flower.z);
+        if (pos.x >= 0 && pos.x <= size && pos.y >= 0 && pos.y <= size) {
+          ctx.fillStyle = flower.color + '80'; // Add alpha
+          ctx.beginPath();
+          ctx.arc(pos.x, pos.y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
+    
+    // Draw central plaza
+    const plazaCenter = toCanvas(0, 0);
+    ctx.fillStyle = isNightMode ? 'rgba(51, 51, 68, 0.4)' : 'rgba(121, 85, 72, 0.3)';
+    ctx.beginPath();
+    ctx.arc(plazaCenter.x, plazaCenter.y, Math.max(3, 12 / (trackData?.scale || defaultScale) * drawSize), 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Draw walkway ring
+    ctx.strokeStyle = isNightMode ? 'rgba(100, 100, 120, 0.3)' : 'rgba(158, 158, 158, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(plazaCenter.x, plazaCenter.y, Math.max(5, 20 / (trackData?.scale || defaultScale) * drawSize), 0, Math.PI * 2);
+    ctx.stroke();
     
     if (!trackData || trackPoints.length < 2) {
       // No track message - stylized
@@ -105,29 +238,20 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
       ctx.fillText('🎢', size / 2, size / 2 - 10);
       ctx.font = '10px Inter, sans-serif';
       ctx.fillText('No track yet', size / 2, size / 2 + 10);
+      
+      // Draw legend
+      drawLegend(ctx, size, isNightMode);
       return;
     }
     
-    const { minX, minZ, scale, centerX, centerZ, curve } = trackData;
-    const margin = 18;
-    const drawSize = size - margin * 2;
-    
-    // Transform world coords to canvas coords
-    const toCanvas = (x: number, z: number) => {
-      const nx = (x - centerX) / scale + 0.5;
-      const nz = (z - centerZ) / scale + 0.5;
-      return {
-        x: margin + nx * drawSize,
-        y: margin + nz * drawSize
-      };
-    };
+    const { curve } = trackData;
     
     // Draw ground grid with subtle styling
     ctx.strokeStyle = 'rgba(99, 102, 241, 0.1)';
     ctx.lineWidth = 0.5;
     const gridStep = 10;
-    const gridMinX = Math.floor(minX / gridStep) * gridStep;
-    const gridMinZ = Math.floor(minZ / gridStep) * gridStep;
+    const gridMinX = Math.floor(trackData.minX / gridStep) * gridStep;
+    const gridMinZ = Math.floor(trackData.minZ / gridStep) * gridStep;
     
     for (let x = gridMinX; x <= trackData.maxX + gridStep; x += gridStep) {
       const p1 = toCanvas(x, trackData.minZ);
@@ -202,6 +326,7 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
       const isSelected = point.id === selectedPointId;
       const isFirst = index === 0;
       const isLast = index === trackPoints.length - 1;
+      const hasLoop = point.hasLoop;
       
       // Glow for selected point
       if (isSelected) {
@@ -209,6 +334,22 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
         ctx.arc(canvasPoint.x, canvasPoint.y, 8, 0, Math.PI * 2);
         ctx.fillStyle = 'rgba(251, 191, 36, 0.3)';
         ctx.fill();
+      }
+      
+      // Loop indicator (purple ring)
+      if (hasLoop) {
+        ctx.beginPath();
+        ctx.arc(canvasPoint.x, canvasPoint.y, 7, 0, Math.PI * 2);
+        ctx.strokeStyle = '#a855f7';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        // Loop icon
+        ctx.fillStyle = '#a855f7';
+        ctx.font = 'bold 6px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('↻', canvasPoint.x, canvasPoint.y - 10);
       }
       
       // Point circle
@@ -317,7 +458,10 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
     ctx.fillStyle = 'rgba(99, 102, 241, 0.6)';
     ctx.fill();
     
-  }, [trackPoints, trackData, selectedPointId, rideProgress, mode, size, isNightMode]);
+    // Draw legend
+    drawLegend(ctx, size, isNightMode);
+    
+  }, [trackPoints, trackData, selectedPointId, rideProgress, mode, size, isNightMode, decorations, loopSegments]);
   
   return (
     <canvas
@@ -332,4 +476,38 @@ export function MiniMap({ size = 150, className = '' }: MiniMapProps) {
       }}
     />
   );
+}
+
+// Helper function to draw legend
+function drawLegend(ctx: CanvasRenderingContext2D, size: number, isNight: boolean) {
+  const legendY = size - 32;
+  const legendX = 8;
+  
+  ctx.font = '7px Inter, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  
+  // Start point
+  ctx.fillStyle = '#22c55e';
+  ctx.beginPath();
+  ctx.arc(legendX + 4, legendY, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillText('Start', legendX + 10, legendY);
+  
+  // End point
+  ctx.fillStyle = '#ef4444';
+  ctx.beginPath();
+  ctx.arc(legendX + 40, legendY, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillText('End', legendX + 46, legendY);
+  
+  // Loop indicator
+  ctx.fillStyle = '#a855f7';
+  ctx.beginPath();
+  ctx.arc(legendX + 4, legendY + 10, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.6)';
+  ctx.fillText('Loop', legendX + 10, legendY + 10);
 }

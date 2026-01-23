@@ -142,6 +142,9 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
     createCorkscrewAtPoint,
     createHelixAtPoint,
     createZeroGRollAtPoint,
+    createHillAtPoint,
+    scaleTrackPointHeight,
+    smoothTrackSection,
     duplicateTrackPoint,
     setCameraTarget,
     savedCoasters,
@@ -458,6 +461,38 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
                     X: {selectedPoint.position.x.toFixed(1)} | Y: {selectedPoint.position.y.toFixed(1)} | Z: {selectedPoint.position.z.toFixed(1)}
                   </div>
                   
+                  {/* Height manipulation controls */}
+                  <div className="text-[9px] text-slate-400 uppercase tracking-wider mt-1 mb-1">Height Control</div>
+                  <div className="flex gap-2">
+                    <Tooltip text="Raise point +5m">
+                      <Button
+                        size="sm"
+                        onClick={() => createHillAtPoint(selectedPointId!, 5, 'bump')}
+                        className="h-8 text-[10px] px-3 flex-1 font-medium bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 shadow-lg shadow-green-500/25 transition-all duration-200"
+                      >
+                        ⬆️ +5m
+                      </Button>
+                    </Tooltip>
+                    <Tooltip text="Lower point -3m">
+                      <Button
+                        size="sm"
+                        onClick={() => createHillAtPoint(selectedPointId!, 3, 'dip')}
+                        className="h-8 text-[10px] px-3 flex-1 font-medium bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 shadow-lg shadow-blue-500/25 transition-all duration-200"
+                      >
+                        ⬇️ -3m
+                      </Button>
+                    </Tooltip>
+                    <Tooltip text="Scale height x2">
+                      <Button
+                        size="sm"
+                        onClick={() => scaleTrackPointHeight(selectedPointId!, 2)}
+                        className="h-8 text-[10px] px-3 flex-1 font-medium bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 shadow-lg shadow-amber-500/25 transition-all duration-200"
+                      >
+                        ↕️ x2
+                      </Button>
+                    </Tooltip>
+                  </div>
+                  
                   <div className="flex gap-2">
                     <Tooltip text="Focus camera on point">
                       <Button
@@ -511,6 +546,42 @@ export function GameUI({ use2DMode = false, onToggle2DMode }: GameUIProps) {
                       </Button>
                     </Tooltip>
                   </div>
+                  
+                  {/* Hill Elements */}
+                  {!selectedPoint.hasLoop && (
+                    <>
+                      <div className="text-[9px] text-slate-400 uppercase tracking-wider mt-2 mb-1">Add Hills</div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Tooltip text="Create bump hill (+8m)">
+                          <Button
+                            size="sm"
+                            onClick={() => createHillAtPoint(selectedPointId!, 8, 'bump')}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-lime-600 to-green-500 hover:from-lime-500 hover:to-green-400 shadow-lg shadow-lime-500/25 transition-all duration-200"
+                          >
+                            ⛰️ Bump
+                          </Button>
+                        </Tooltip>
+                        <Tooltip text="Create dip valley (-5m)">
+                          <Button
+                            size="sm"
+                            onClick={() => createHillAtPoint(selectedPointId!, 5, 'dip')}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-sky-600 to-cyan-500 hover:from-sky-500 hover:to-cyan-400 shadow-lg shadow-sky-500/25 transition-all duration-200"
+                          >
+                            🕳️ Dip
+                          </Button>
+                        </Tooltip>
+                        <Tooltip text="Create camelback (dual humps)">
+                          <Button
+                            size="sm"
+                            onClick={() => createHillAtPoint(selectedPointId!, 6, 'camelback')}
+                            className="h-8 text-[10px] px-2 font-medium bg-gradient-to-r from-yellow-600 to-amber-500 hover:from-yellow-500 hover:to-amber-400 shadow-lg shadow-yellow-500/25 transition-all duration-200"
+                          >
+                            🐫 Camel
+                          </Button>
+                        </Tooltip>
+                      </div>
+                    </>
+                  )}
                   
                   {/* Track Elements */}
                   {!selectedPoint.hasLoop && (

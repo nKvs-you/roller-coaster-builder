@@ -17,7 +17,16 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
   const meshRef = useRef<THREE.Mesh>(null);
   const transformRef = useRef<any>(null);
   const [meshReady, setMeshReady] = useState(false);
-  const { selectedPointId, selectPoint, updateTrackPoint, updateTrackPointTilt, mode, setIsDraggingPoint } = useRollerCoaster();
+  const [transformMode, setTransformMode] = useState<'translate' | 'scale'>('translate');
+  const { 
+    selectedPointId, 
+    selectPoint, 
+    updateTrackPoint, 
+    updateTrackPointTilt, 
+    scaleTrackPointHeight,
+    mode, 
+    setIsDraggingPoint 
+  } = useRollerCoaster();
   
   const isSelected = selectedPointId === id;
   
@@ -145,7 +154,7 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
           <TransformControls
             ref={transformRef}
             object={meshRef.current}
-            mode="translate"
+            mode={transformMode}
             size={0.75}
             showX={true}
             showY={true}
@@ -161,6 +170,51 @@ export function TrackPoint({ id, position, tilt, index, isFirst, isLast }: Track
                 backdropFilter: 'blur(10px)'
               }}
             >
+              {/* Transform mode toggle */}
+              <div className="flex gap-1 mb-2">
+                <button
+                  onClick={() => setTransformMode('translate')}
+                  className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${
+                    transformMode === 'translate' 
+                      ? 'bg-orange-500 text-white' 
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  ✥ Move
+                </button>
+                <button
+                  onClick={() => setTransformMode('scale')}
+                  className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${
+                    transformMode === 'scale' 
+                      ? 'bg-purple-500 text-white' 
+                      : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+                  }`}
+                >
+                  ↔ Scale
+                </button>
+              </div>
+              
+              {/* Position display */}
+              <div className="text-[9px] text-slate-500 mb-2 font-mono">
+                {position.x.toFixed(1)}, {position.y.toFixed(1)}, {position.z.toFixed(1)}
+              </div>
+              
+              {/* Height quick controls */}
+              <div className="flex gap-1 mb-2">
+                <button
+                  onClick={() => scaleTrackPointHeight(id, 1.25)}
+                  className="px-2 py-1 text-[9px] rounded bg-green-600/80 hover:bg-green-500 text-white font-medium"
+                >
+                  ▲ +25%
+                </button>
+                <button
+                  onClick={() => scaleTrackPointHeight(id, 0.8)}
+                  className="px-2 py-1 text-[9px] rounded bg-blue-600/80 hover:bg-blue-500 text-white font-medium"
+                >
+                  ▼ -20%
+                </button>
+              </div>
+              
               <div className="text-[10px] text-slate-400 mb-2 font-semibold">Point {index + 1} Tilt</div>
               <div className="flex items-center gap-3">
                 <span className="text-orange-400">↶</span>

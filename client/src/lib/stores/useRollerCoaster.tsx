@@ -173,12 +173,16 @@ interface RollerCoasterState {
   duplicateTrackPoint: (id: string) => void;
   updateTrackPoint: (id: string, position: THREE.Vector3) => void;
   updateTrackPointTilt: (id: string, tilt: number) => void;
+  updateTrackPointScale: (id: string, scale: THREE.Vector3) => void;
+  scaleTrackPointHeight: (id: string, heightMultiplier: number) => void;
   removeTrackPoint: (id: string) => void;
   createLoopAtPoint: (id: string, elementType?: TrackElementType) => void;
   removeLoopAtPoint: (id: string) => void;
   createCorkscrewAtPoint: (id: string) => void;
   createHelixAtPoint: (id: string, direction?: 'left' | 'right') => void;
   createZeroGRollAtPoint: (id: string) => void;
+  createHillAtPoint: (id: string, height: number, type: 'bump' | 'dip' | 'camelback') => void;
+  smoothTrackSection: (startId: string, endId: string) => void;
   selectPoint: (id: string | null) => void;
   selectNextPoint: () => void;
   selectPrevPoint: () => void;
@@ -452,6 +456,133 @@ export const useRollerCoaster = create<RollerCoasterState>()(
         trackPoints: newTrackPoints,
         loopSegments: [...state.loopSegments, loopSegment],
       };
+    });
+  },
+  
+  // Create a hill at a point by adjusting heights of surrounding points
+  createHillAtPoint: (id, height = 8, type = 'bump') => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const pointIndex = state.trackPoints.findIndex((p) => p.id === id);
+      if (pointIndex === -1) return state;
+      
+      const newTrackPoints = [...state.trackPoints];
+      const point = newTrackPoints[pointIndex];
+      
+      // Calculate hill shape based on type
+      if (type === 'bump') {
+        // Single peak hill - raise selected point
+        const newY = Math.max(1, point.position.y + height);
+        newTrackPoints[pointIndex] = {
+          ...point,
+          position: new THREE.Vector3(point.position.x, newY, point.position.z)
+        };
+      } else if (type === 'dip') {
+        // Dip/valley - lower selected point
+        const newY = Math.max(0.5, point.position.y - height);
+        newTrackPoints[pointIndex] = {
+          ...point,
+          position: new THREE.Vector3(point.position.x, newY, point.position.z)
+        };
+      } else if (type === 'camelback') {
+        // Camelback hill - creates two humps with a valley
+        // Raise current point
+        const currentNewY = Math.max(1, point.position.y + height);
+        newTrackPoints[pointIndex] = {
+          ...point,
+          position: new THREE.Vector3(point.position.x, currentNewY, point.position.z)
+        };
+        
+        // Raise previous point if exists
+        if (pointIndex > 0) {
+          const prevPoint = newTrackPoints[pointIndex - 1];
+          const prevNewY = Math.max(1, prevPoint.position.y + height * 0.7);
+          newTrackPoints[pointIndex - 1] = {
+            ...prevPoint,
+            position: new THREE.Vector3(prevPoint.position.x, prevNewY, prevPoint.position.z)
+          };
+        }
+        
+        // Raise next point if exists
+        if (pointIndex < newTrackPoints.length - 1) {
+          const nextPoint = newTrackPoints[pointIndex + 1];
+          const nextNewY = Math.max(1, nextPoint.position.y + height * 0.7);
+          newTrackPoints[pointIndex + 1] = {
+            ...nextPoint,
+            position: new THREE.Vector3(nextPoint.position.x, nextNewY, nextPoint.position.z)
+          };
+        }
+      }
+      
+      return { trackPoints: newTrackPoints };
+    });
+  },
+  
+  // Scale the height of a point
+  scaleTrackPointHeight: (id, heightMultiplier) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const newTrackPoints = state.trackPoints.map((point) => {
+        if (point.id !== id) return point;
+        const newY = Math.max(0.5, point.position.y * heightMultiplier);
+        return {
+          ...point,
+          position: new THREE.Vector3(point.position.x, newY, point.position.z)
+        };
+      });
+      return { trackPoints: newTrackPoints };
+    });
+  },
+  
+  // Scale a track point's position
+  updateTrackPointScale: (id, scale) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const newTrackPoints = state.trackPoints.map((point) => {
+        if (point.id !== id) return point;
+        return {
+          ...point,
+          position: new THREE.Vector3(
+            point.position.x * scale.x,
+            Math.max(0.5, point.position.y * scale.y),
+            point.position.z * scale.z
+          )
+        };
+      });
+      return { trackPoints: newTrackPoints };
+    });
+  },
+  
+  // Smooth a section of track between two points
+  smoothTrackSection: (startId, endId) => {
+    const currentState = get();
+    currentState.pushHistory();
+    set((state) => {
+      const startIndex = state.trackPoints.findIndex((p) => p.id === startId);
+      const endIndex = state.trackPoints.findIndex((p) => p.id === endId);
+      
+      if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) return state;
+      
+      const newTrackPoints = [...state.trackPoints];
+      const startPoint = newTrackPoints[startIndex];
+      const endPoint = newTrackPoints[endIndex];
+      
+      // Linear interpolation for height between start and end
+      const numPoints = endIndex - startIndex + 1;
+      for (let i = startIndex; i <= endIndex; i++) {
+        const t = (i - startIndex) / (numPoints - 1);
+        const point = newTrackPoints[i];
+        const newY = startPoint.position.y * (1 - t) + endPoint.position.y * t;
+        newTrackPoints[i] = {
+          ...point,
+          position: new THREE.Vector3(point.position.x, Math.max(0.5, newY), point.position.z)
+        };
+      }
+      
+      return { trackPoints: newTrackPoints };
     });
   },
   
