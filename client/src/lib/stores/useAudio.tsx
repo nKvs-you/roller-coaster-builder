@@ -3,6 +3,7 @@ import { create } from "zustand";
 interface AudioState {
   backgroundMusic: HTMLAudioElement | null;
   daylightMusic: HTMLAudioElement | null;
+  dayMusic: HTMLAudioElement | null;
   nightMusic: HTMLAudioElement | null;
   hitSound: HTMLAudioElement | null;
   successSound: HTMLAudioElement | null;
@@ -13,6 +14,7 @@ interface AudioState {
   // Setter functions
   setBackgroundMusic: (music: HTMLAudioElement) => void;
   setDaylightMusic: (music: HTMLAudioElement) => void;
+  setDayMusic: (music: HTMLAudioElement) => void;
   setNightMusic: (music: HTMLAudioElement) => void;
   setHitSound: (sound: HTMLAudioElement) => void;
   setSuccessSound: (sound: HTMLAudioElement) => void;
@@ -30,6 +32,7 @@ interface AudioState {
 export const useAudio = create<AudioState>((set, get) => ({
   backgroundMusic: null,
   daylightMusic: null,
+  dayMusic: null,
   nightMusic: null,
   hitSound: null,
   successSound: null,
@@ -39,6 +42,7 @@ export const useAudio = create<AudioState>((set, get) => ({
   
   setBackgroundMusic: (music) => set({ backgroundMusic: music }),
   setDaylightMusic: (music) => set({ daylightMusic: music }),
+  setDayMusic: (music) => set({ dayMusic: music, daylightMusic: music }),
   setNightMusic: (music) => set({ nightMusic: music }),
   setHitSound: (sound) => set({ hitSound: sound }),
   setSuccessSound: (sound) => set({ successSound: sound }),

@@ -24,34 +24,48 @@ function MusicController() {
   const { isNightMode } = useRollerCoaster();
   const { 
     setNightMusic, nightMusic,
+    setDayMusic, dayMusic,
     isMuted 
   } = useAudio();
   const hasStartedRef = useRef(false);
   
-  // Only load and play music during night mode
+  // Load day and night music
   useEffect(() => {
     const base = import.meta.env.BASE_URL || '/';
     
+    // Night mode music
     const nightMusicAudio = new Audio(`${base}sounds/menuloop.mp3`);
     nightMusicAudio.loop = true;
     nightMusicAudio.volume = 0.4;
     setNightMusic(nightMusicAudio);
     
+    // Day mode music
+    const dayMusicAudio = new Audio(`${base}sounds/lovelyday.mp3`);
+    dayMusicAudio.loop = true;
+    dayMusicAudio.volume = 0.35;
+    setDayMusic(dayMusicAudio);
+    
     return () => {
       nightMusicAudio.pause();
       nightMusicAudio.src = "";
+      dayMusicAudio.pause();
+      dayMusicAudio.src = "";
     };
-  }, [setNightMusic]);
+  }, [setNightMusic, setDayMusic]);
   
-  // Start music on first interaction (only plays in night mode)
+  // Start music on first interaction
   useEffect(() => {
     const startMusicOnInteraction = () => {
       if (hasStartedRef.current) return;
       hasStartedRef.current = true;
       
-      // Only play if in night mode
-      if (!isMuted && isNightMode && nightMusic) {
-        nightMusic.play().catch(() => {});
+      // Play appropriate music based on mode
+      if (!isMuted) {
+        if (isNightMode && nightMusic) {
+          nightMusic.play().catch(() => {});
+        } else if (!isNightMode && dayMusic) {
+          dayMusic.play().catch(() => {});
+        }
       }
       
       document.removeEventListener('click', startMusicOnInteraction);
@@ -65,30 +79,25 @@ function MusicController() {
       document.removeEventListener('click', startMusicOnInteraction);
       document.removeEventListener('keydown', startMusicOnInteraction);
     };
-  }, [nightMusic, isNightMode, isMuted]);
+  }, [nightMusic, dayMusic, isNightMode, isMuted]);
   
-  // Handle night mode toggle - music only plays at night
+  // Handle day/night mode toggle
   useEffect(() => {
-    if (!nightMusic || !hasStartedRef.current) return;
+    if (!hasStartedRef.current) return;
     
-    if (isNightMode && !isMuted) {
-      nightMusic.currentTime = 0;
-      nightMusic.play().catch(() => {});
-    } else {
-      nightMusic.pause();
-    }
-  }, [isNightMode, nightMusic, isMuted]);
-  
-  // Handle mute toggle
-  useEffect(() => {
-    if (!hasStartedRef.current || !nightMusic) return;
-    
-    if (isMuted || !isNightMode) {
-      nightMusic.pause();
+    if (isMuted) {
+      nightMusic?.pause();
+      dayMusic?.pause();
     } else if (isNightMode) {
-      nightMusic.play().catch(() => {});
+      dayMusic?.pause();
+      nightMusic?.currentTime === 0;
+      nightMusic?.play().catch(() => {});
+    } else {
+      nightMusic?.pause();
+      dayMusic?.currentTime === 0;
+      dayMusic?.play().catch(() => {});
     }
-  }, [isMuted, nightMusic, isNightMode]);
+  }, [isNightMode, nightMusic, dayMusic, isMuted]);
   
   return null;
 }
